@@ -1033,3 +1033,100 @@ tbody tr:hover {
     transition: none !important;
   }
 }
+
+/* F-A 运维记录表单与时间线 */
+.record-form {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  padding: 14px 20px 18px;
+  border-top: 1px solid #eaf0f1;
+  background: #f8fbfa;
+}
+.form-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+  gap: 12px;
+}
+.record-form label {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  font-size: 11px;
+  color: var(--muted);
+}
+.record-form input,
+.record-form select,
+.record-form textarea {
+  border: 1px solid #c6d8db;
+  border-radius: 4px;
+  padding: 8px 10px;
+  font-size: 12px;
+  background: #fff;
+  color: #22414a;
+}
+.record-form textarea {
+  min-height: 64px;
+  resize: vertical;
+}
+.form-actions {
+  display: flex;
+  gap: 10px;
+}
+.action-error {
+  margin: 10px 20px 0;
+  color: #b3454c;
+  font-size: 12px;
+}
+.content-cell {
+  max-width: 260px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+}
+.timeline {
+  list-style: none;
+  padding: 6px 4px 0;
+}
+.timeline li {
+  display: flex;
+  gap: 12px;
+  padding: 10px 0;
+  border-bottom: 1px solid #eef3f3;
+}
+.timeline li:last-child {
+  border-bottom: 0;
+}
+.timeline-dot {
+  width: 9px;
+  height: 9px;
+  border-radius: 50%;
+  margin-top: 5px;
+  flex-shrink: 0;
+}
+.timeline-dot.wo {
+  background: #4d8f88;
+}
+.timeline-dot.insp {
+  background: #d49c3c;
+}
+.timeline-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+}
+.timeline-head svg {
+  color: var(--petrol);
+}
+.timeline li p {
+  font-size: 11px;
+  color: var(--muted);
+  margin: 4px 0 2px;
+}
+.timeline li small {
+  font-size: 10px;
+  color: #9db2b7;
+}
+

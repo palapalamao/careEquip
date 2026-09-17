@@ -19,6 +19,8 @@ Push-Location $projectRoot
 try {
   & node scripts/prepare-seed.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Synthetic data preview generation failed' }
+  & node scripts/prepare-seed-v2.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'Synthetic records v2 preview generation failed' }
   & $fanBin scripts/validate-axon.fan ($projectRoot.Replace('\','/') + '/')
   if ($LASTEXITCODE -ne 0) { throw 'Menu or seed Axon syntax validation failed' }
   & $fanBin build.fan
@@ -26,3 +28,4 @@ try {
   & (Join-Path $PSScriptRoot 'check-pod.ps1')
 } finally { Pop-Location }
 Write-Host 'Built output\deviceManager.pod. No FIN installation, restart or data mutation was performed.'
+

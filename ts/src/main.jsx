@@ -28,9 +28,12 @@ createRoot(document.getElementById("root")).render(
           <Route path="/overview" element={<App />} />
           <Route path="/devices" element={<App />} />
           <Route path="/alarms" element={<App />} />
+          <Route path="/workorders" element={<App />} />
+          <Route path="/inspections" element={<App />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
       </HashRouter>
     </ErrorBoundary>
   </React.StrictMode>,
 );
+

@@ -6,6 +6,12 @@ export const STATES = {
   fault: ["故障", "danger"],
   offline: ["离线", "warning"],
   unknown: ["未知", "muted"],
+  // F-A 运维工单 / 检测记录状态
+  open: ["待处理", "warning"],
+  inProgress: ["进行中", "muted"],
+  closed: ["已关闭", "success"],
+  pass: ["达标", "success"],
+  fail: ["不达标", "danger"],
   fresh: ["有效", "success"],
   stale: ["陈旧", "warning"],
   critical: ["严重", "danger"],
@@ -20,3 +26,4 @@ export default function StatusBadge({ status = "unknown" }) {
     </span>
   );
 }
+

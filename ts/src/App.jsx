@@ -26,6 +26,8 @@ import {
   Droplets,
   Lightbulb,
   HeartPulse,
+  Wrench,
+  FileCheck2,
   Layers,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -34,6 +36,8 @@ import { filterDevices, summarize, toCsv } from "@/data/model";
 import { hostProject, loadDataset } from "@/data/provider";
 import StatusBadge from "@/components/StatusBadge";
 import DeviceDetail from "@/components/DeviceDetail";
+import WorkOrdersPage from "@/pages/WorkOrders";
+import InspectionsPage from "@/pages/Inspections";
 const ICONS = {
   hvac: Fan,
   power: Zap,
@@ -48,6 +52,8 @@ const PAGE_NAMES = {
   overview: "设备总览",
   devices: "设备台账",
   alarms: "异常设备",
+  workorders: "运维工单",
+  inspections: "检测记录",
 };
 const initialMode = () =>
   new URLSearchParams(window.location.search).get("mode") === "demo"
@@ -189,6 +195,17 @@ export default function App() {
                 {state.data.alarms.length}
               </span>
             )}
+          </NavLink>
+        </nav>
+        <div className="sidebar-section">运行管理</div>
+        <nav aria-label="运行管理">
+          <NavLink to="/workorders">
+            <Wrench size={18} />
+            运维工单
+          </NavLink>
+          <NavLink to="/inspections">
+            <FileCheck2 size={18} />
+            检测记录
           </NavLink>
         </nav>
         <div className="sidebar-section">设备系统</div>
@@ -601,6 +618,18 @@ export default function App() {
                     </div>
                   </div>
                 </section>
+              ) : page === "workorders" ? (
+                <WorkOrdersPage
+                  mode={mode}
+                  devices={devices}
+                  onChanged={() => setRevision((v) => v + 1)}
+                />
+              ) : page === "inspections" ? (
+                <InspectionsPage
+                  mode={mode}
+                  devices={devices}
+                  onChanged={() => setRevision((v) => v + 1)}
+                />
               ) : (
                 <section className="panel">
                   <div className="panel-title">
@@ -650,9 +679,14 @@ export default function App() {
         <DeviceDetail
           key={selected.id}
           device={selected}
+          mode={mode}
+          docs={state.data?.docs || []}
+          onChanged={() => setRevision((v) => v + 1)}
           onClose={() => setSelected(null)}
         />
       )}
     </div>
   );
 }
+
+
