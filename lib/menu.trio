@@ -1,0 +1,24 @@
+name: dmApp
+finStackMobileMenu
+func
+overridable
+doc: "Open the device management application in FIN End User."
+src:
+  () =>
+  do
+    root: "/pod/deviceManager/res/web/dm/index.html"
+    [
+      {
+        displayName: "设备管理",
+        appId: "dmApp",
+        link: "",
+        icon: "icon-buildings",
+        iconType: "class",
+        ui: "mobile",
+        minUiTarget: "phone",
+        order: -290,
+        action: "top.app.LoadApplication('" + root + "#/overview', null, null, {app: '_deviceManager'});top.app.ToggleCollapse(true);",
+        keepOpen: true
+      }
+    ].toGrid
+  end

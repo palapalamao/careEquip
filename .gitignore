@@ -1,0 +1,5 @@
+ts/node_modules/
+res/web/dm/
+output/
+test-results/
+*.log
