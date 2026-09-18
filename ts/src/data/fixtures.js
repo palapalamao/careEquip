@@ -139,50 +139,250 @@ function createDemoDocs(devices) {
   }));
 }
 
-// F-A R2.1：确定性模拟工单（状态迁移合法，引用闭合）
-function createDemoWorkOrders(devices) {
-  const byCode = (code) => devices.find((d) => d.code === code);
-  const rows = [
-    { code: "AHU-003", type: "repair", status: "closed", assignee: "王工", scheduled: "2026-08-02T09:00:00+08:00", started: "2026-08-02T09:30:00+08:00", closed: "2026-08-03T15:00:00+08:00", content: "送风温度异常，检查表冷器与传感器", result: "更换温度传感器，试运行正常" },
-    { code: "PDB-001", type: "maintenance", status: "inProgress", assignee: "李工", scheduled: "2026-09-10T08:30:00+08:00", started: "2026-09-10T08:40:00+08:00", closed: null, content: "季度巡检：紧固端子、清扫柜体、红外测温", result: "" },
-    { code: "PMP-002", type: "maintenance", status: "open", assignee: "赵工", scheduled: "2026-09-15T14:00:00+08:00", started: null, closed: null, content: "泵组例行保养：轴承润滑、机械密封检查", result: "" },
-    { code: "OR-001", type: "retrofit", status: "open", assignee: "陈工", scheduled: "2026-10-08T10:00:00+08:00", started: null, closed: null, content: "手术室压差监测终端改造，更换为带报警输出型", result: "" },
-  ];
-  return rows.map((r, i) => {
-    const device = byCode(r.code);
-    return {
-      id: `dm-demo-wo-${String(i + 1).padStart(3, "0")}`,
-      deviceId: device.id,
-      deviceCode: device.code,
-      deviceName: device.name,
-      module: device.module,
-      type: r.type,
-      typeName: woTypeName(r.type),
-      status: r.status,
-      assignee: r.assignee,
-      scheduled: r.scheduled,
-      started: r.started,
-      closed: r.closed,
-      content: r.content,
-      result: r.result,
-      createdAt: r.scheduled,
-      createdBy: "system",
-      dataset: RECORDS_DATASET_ID,
-      source: "synthetic",
-    };
-  });
+// F-A R2.1：三甲医院规模确定性模拟工单（状态迁移合法、引用闭合、固定种子可重放）
+// 规模：预防性维护 96（48 台×2 次）+ 科室报修 28 + 改造 6 ≈ 130 单，覆盖 2026-03 至 2026-09
+const ENGINEERS = ["王建国", "李铁军", "赵晓东", "陈志明", "刘亚楠", "孙立军"];
+const REPORT_DEPTS = ["急诊科", "重症医学科", "手术室", "住院部", "门诊部", "检验科", "放射科", "药剂科", "消毒供应中心", "血透中心"];
+const GENERIC_RESULTS = ["保养完成，运行正常", "巡检无异常，记录归档", "完成保养并复测合格"];
+
+// 固定种子伪随机：数据集在任何机器上重放结果一致
+function mulberry32(seed) {
+  let a = seed >>> 0;
+  return function () {
+    a |= 0; a = (a + 0x6d2b79f5) | 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+const pick = (rng, arr) => arr[Math.floor(rng() * arr.length)];
+const pad2 = (n) => String(n).padStart(2, "0");
+// 时间一律在 UTC 帧内按北京时间墙钟构造与运算，保证跨时区确定性
+const mk = (y, mo, d, hh, mi) => new Date(Date.UTC(y, mo - 1, d, hh, mi));
+const iso = (dt) =>
+  `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}T${pad2(dt.getUTCHours())}:${pad2(dt.getUTCMinutes())}:00+08:00`;
+const isoDate = (dt) => `${dt.getUTCFullYear()}-${pad2(dt.getUTCMonth() + 1)}-${pad2(dt.getUTCDate())}`;
+const addMinutes = (dt, mins) => new Date(dt.getTime() + mins * 60000);
+const addDays = (dt, days) => new Date(dt.getTime() + days * 86400000);
+const atSlot = (dt, hh, mm) => mk(dt.getUTCFullYear(), dt.getUTCMonth() + 1, dt.getUTCDate(), hh, mm);
+
+const WIN_START = mk(2026, 3, 2, 8, 30); // 数据窗口起点（快照 2026-09-09 之前）
+const EARLY = mk(2026, 7, 1, 0, 0); // 7 月前：全部已关闭
+const MID = mk(2026, 8, 21, 0, 0); // 8/21 前：大部关闭，少量进行中
+const SCHED_SLOTS = [[8, 30], [9, 0], [14, 0], [15, 0]];
+
+// 按设备系统的工单内容库（三甲后勤工程部口径）
+const WO_CONTENT = {
+  hvac: {
+    maintenance: ["表冷器清洗与挡水板检查", "风机皮带张力检查与轴承润滑", "空调箱内部消杀", "送回风过滤网更换", "冷凝水盘清理与排水检查"],
+    repair: [
+      { content: "送风温度偏差大，检查表冷器与传感器", result: "更换温度传感器，试运行正常" },
+      { content: "风机运行电流偏高，检查电机轴承", result: "更换轴承并加注润滑脂，电流恢复正常" },
+      { content: "加湿段漏水，检查电磁阀与水位开关", result: "更换水位浮球开关，连续观察三天无渗漏" },
+      { content: "房间压差波动，检查送回风阀执行器", result: "重新标定风阀执行器，压差稳定" },
+    ],
+  },
+  power: {
+    maintenance: ["季度巡检：紧固端子、清扫柜体、红外测温", "电容柜电容容量检查", "抽屉柜操作机构润滑检查", "柴油发电机带载试运行"],
+    repair: [
+      { content: "馈线柜温度异常，红外测温排查接点", result: "紧固母排连接螺栓，复测温度正常" },
+      { content: "无功补偿投切异常，检查控制器与接触器", result: "更换接触器，功率因数恢复 0.95 以上" },
+      { content: "出线回路偶发跳闸，检查电缆绝缘", result: "更换破损电缆段，绝缘复测合格" },
+    ],
+  },
+  water: {
+    maintenance: ["泵组例行保养：轴承润滑、机械密封检查", "水泵房环境消杀与集水坑清淤", "稳压罐压力校验", "管网压力波动检查"],
+    repair: [
+      { content: "供水压力波动大，检查变频器参数", result: "重新整定 PID 参数，压力波动恢复正常" },
+      { content: "水泵异响，检查叶轮与汽蚀情况", result: "更换磨损叶轮，运行噪声恢复正常" },
+      { content: "泵体渗漏，检查机械密封", result: "更换机械密封，试运行无渗漏" },
+    ],
+  },
+  lighting: {
+    maintenance: ["公共区域照明回路巡检，更换故障灯具", "照明控制时钟与光感校准", "应急照明充放电试验"],
+    repair: [
+      { content: "病区走廊灯具批量闪烁，检查驱动电源", result: "更换 LED 驱动电源，故障消除" },
+      { content: "照明回路无法远程控制，检查控制模块", result: "更换继电器模块，远控恢复正常" },
+    ],
+  },
+  elevator: {
+    maintenance: ["电梯半月保养：曳引机、制动器、门系统检查", "电梯机房降温与井道照明检查", "五方对讲通话测试"],
+    repair: [
+      { content: "电梯运行平层误差大，检查曳引钢丝绳", result: "调整钢丝绳张力，平层精度恢复正常" },
+      { content: "轿厢门开关异常，检查光幕与门机", result: "更换光幕组件，开关门恢复正常" },
+      { content: "运行有异响，检查导靴与导轨润滑", result: "更换导靴衬垫并润滑导轨" },
+    ],
+  },
+  safety: {
+    maintenance: ["监控图像巡检，清理存储与校时", "门禁权限月度审计与备份", "入侵报警探测器灵敏度测试"],
+    repair: [
+      { content: "病区监控离线，检查 PoE 交换机", result: "更换交换机电源模块，图像恢复" },
+      { content: "门禁刷卡无响应，检查读卡器与锁电源", result: "更换读卡器，刷卡恢复正常" },
+    ],
+  },
+  "medical-space": {
+    maintenance: ["手术室净化空调过滤器压差检查", "手术室墙面与地面清洁消毒检查", "压差梯度与换气次数月度测试"],
+    repair: [
+      { content: "手术室压差偏低，检查密封与新风量", result: "更换门密封条并调整新风阀，压差达标" },
+      { content: "术中照明闪烁，检查手术灯电源", result: "更换手术灯电源模块" },
+    ],
+  },
+  "medical-equipment": {
+    maintenance: ["医疗设备监测终端数据核对与校准", "设备机房温湿度与 UPS 巡检"],
+    repair: [
+      { content: "监护数据上传中断，检查物联网网关", result: "升级网关固件，上传恢复" },
+      { content: "药品冰箱温度报警频繁，检查传感器与门封", result: "更换温度传感器，报警消除" },
+    ],
+  },
+};
+const REPAIR_COUNTS = { hvac: 5, power: 4, water: 4, lighting: 3, elevator: 4, safety: 3, "medical-space": 2, "medical-equipment": 3 };
+const RETROFITS = [
+  { module: "medical-space", content: "手术室压差监测终端改造，更换为带报警输出型" },
+  { module: "lighting", content: "地下车库照明 LED 分区节能改造" },
+  { module: "safety", content: "视频监控存储扩容改造，录像保存 90 天" },
+  { module: "power", content: "低压柜智能仪表改造，接入分项计量" },
+  { module: "water", content: "生活水泵组加装远程启停与状态上传" },
+  { module: "elevator", content: "电梯群控系统改造，优化高峰期调度" },
+];
+
+// 时间线决定状态：早期单已关闭，近期单进行中/待处理（单向迁移合法）
+function statusByTimeline(rng, sched) {
+  if (sched < EARLY) return "closed";
+  if (sched < MID) return rng() < 0.78 ? "closed" : "inProgress";
+  return rng() < 0.55 ? "open" : "inProgress";
 }
 
-// F-A R2.2：确定性模拟定期检测记录（对应标准 9.1.2 检测对象）
+function createDemoWorkOrders(devices) {
+  const rng = mulberry32(1509);
+  const byModule = (m) => devices.filter((d) => d.module === (typeof m === "string" ? m : m.id));
+  const rows = [];
+  // 1) 预防性维护：每台设备每季度-ish 一次，共 2 次
+  for (const module of MODULES) {
+    for (const dev of byModule(module)) {
+      for (let k = 0; k < 2; k++) {
+        const sched = atSlot(addDays(WIN_START, 2 + k * 82 + Math.floor(rng() * 24)), ...pick(rng, SCHED_SLOTS));
+        const status = statusByTimeline(rng, sched);
+        const started = status === "open" ? null : addMinutes(sched, 10 + Math.floor(rng() * 80));
+        const closed = status === "closed" ? addMinutes(started, 60 + Math.floor(rng() * 300)) : null;
+        rows.push({
+          device: dev, type: "maintenance", status,
+          assignee: pick(rng, ENGINEERS), scheduled: sched, started, closed,
+          content: pick(rng, WO_CONTENT[module.id].maintenance),
+          result: closed ? pick(rng, GENERIC_RESULTS) : "",
+          createdBy: "后勤工程部",
+        });
+      }
+    }
+  }
+  // 2) 科室报修：按系统故障权重分布
+  for (const [moduleId, count] of Object.entries(REPAIR_COUNTS)) {
+    const pool = byModule(moduleId);
+    const bank = WO_CONTENT[moduleId].repair;
+    for (let k = 0; k < count; k++) {
+      const item = bank[k % bank.length];
+      const sched = atSlot(addDays(WIN_START, Math.floor(rng() * 180)), ...pick(rng, SCHED_SLOTS));
+      const status = statusByTimeline(rng, sched);
+      const started = status === "open" ? null : addMinutes(sched, 10 + Math.floor(rng() * 80));
+      const closed = status === "closed" ? addMinutes(started, 240 + Math.floor(rng() * 2640)) : null;
+      rows.push({
+        device: pool[Math.floor(rng() * pool.length)], type: "repair", status,
+        assignee: pick(rng, ENGINEERS), scheduled: sched, started, closed,
+        content: item.content, result: closed ? item.result : "",
+        createdBy: pick(rng, REPORT_DEPTS) + "报修",
+      });
+    }
+  }
+  // 3) 改造：基建处立项，周期以天计
+  for (const r of RETROFITS) {
+    const sched = atSlot(addDays(WIN_START, 150 + Math.floor(rng() * 40)), ...pick(rng, SCHED_SLOTS));
+    const status = statusByTimeline(rng, sched);
+    const started = status === "open" ? null : addDays(sched, 1);
+    const closed = status === "closed" ? atSlot(addDays(started, 2 + Math.floor(rng() * 7)), 17, 0) : null;
+    const devs = byModule(r.module);
+    rows.push({
+      device: devs[Math.floor(rng() * devs.length)], type: "retrofit", status,
+      assignee: pick(rng, ENGINEERS), scheduled: sched, started, closed,
+      content: r.content, result: closed ? "改造完成，联调验收合格" : "",
+      createdBy: "基建处",
+    });
+  }
+  rows.sort((a, b) => a.scheduled - b.scheduled);
+  return rows.map((r, i) => ({
+    id: `dm-demo-wo-${String(i + 1).padStart(3, "0")}`,
+    deviceId: r.device.id,
+    deviceCode: r.device.code,
+    deviceName: r.device.name,
+    module: r.device.module,
+    type: r.type,
+    typeName: woTypeName(r.type),
+    status: r.status,
+    assignee: r.assignee,
+    scheduled: iso(r.scheduled),
+    started: r.started ? iso(r.started) : null,
+    closed: r.closed ? iso(r.closed) : null,
+    content: r.content,
+    result: r.result,
+    createdAt: iso(r.scheduled),
+    createdBy: r.createdBy,
+    dataset: RECORDS_DATASET_ID,
+    source: "synthetic",
+  }));
+}
+
+// F-A R2.2：三甲医院规模确定性模拟定期检测记录（对应标准 9.1.2 检测对象）
+// 覆盖 9 类检测对象：4 类每月 2 次、4 类每季度、射线防护年度，共 65 条
 function createDemoInspections(devices) {
   const byCode = (code) => devices.find((d) => d.code === code);
-  const rows = [
-    { code: "PMP-001", target: "drinkingWater", result: "pass", date: "2026-07-15", note: "生活水泵房出水浊度、余氯检测", reportUri: "reports://2026H1/drinking-water.pdf" },
-    { code: "OR-001", target: "medicalGas", result: "pass", date: "2026-08-05", note: "手术室医用气体终端压力与纯度检测", reportUri: "reports://2026H1/medical-gas.pdf" },
-    { code: "AHU-001", target: "hvac", result: "pass", date: "2026-08-20", note: "空调系统冷却水、冷冻水水质检测", reportUri: "reports://2026H1/hvac-water.pdf" },
-    { code: "PMP-003", target: "sewage", result: "fail", date: "2026-09-01", note: "污水站出水 COD 超标，已转工单整改", reportUri: "reports://2026H1/sewage.pdf" },
-    { code: null, target: "radiation", result: "pass", date: "2026-06-12", note: "放射科机房防护年度检测", reportUri: "reports://2026/radiation.pdf" },
+  const rows = [];
+  const push = (dateStr, target, code, note, by, uri, result = "pass") =>
+    rows.push({ date: dateStr, target, code, note, by, uri, result });
+  const M3TO8 = [3, 4, 5, 6, 7, 8];
+  // 每月 2 次（上旬 5 日 / 下旬 20 日；9 月只到快照日 9/9，故仅上旬）
+  const monthly = [
+    { target: "drinkingWater", codes: ["PMP-001", "PMP-002"], by: "后勤工程部", uri: "drinking-water.pdf",
+      note: (slot) => `生活水泵房出水浊度、余氯检测（${slot}月检）` },
+    { target: "medicalGas", codes: ["OR-001", "OR-002", "OR-003", "MED-001", "MED-002", "MED-003"], by: "器械科", uri: "medical-gas.pdf",
+      note: (slot) => `手术室、ICU 医用气体终端压力与纯度检测（${slot}月检）` },
+    { target: "sewage", codes: ["PMP-003", "PMP-006"], by: "后勤工程部", uri: "sewage.pdf",
+      note: (slot) => `污水站出水 COD、氨氮检测（${slot}月检）` },
+    { target: "medicalWaste", codes: [], by: "院感科", uri: "medical-waste.pdf",
+      note: (slot) => `医疗废物分类收集、交接登记与暂存间检查（${slot}月检）` },
   ];
+  let seq = 0;
+  for (const m of monthly) {
+    const slots = [...M3TO8.flatMap((mo) => [`2026-${pad2(mo)}-05`, `2026-${pad2(mo)}-20`]), "2026-09-05"];
+    for (const dateStr of slots) {
+      const slot = dateStr.endsWith("05") ? "上旬" : "下旬";
+      const code = m.codes.length ? m.codes[seq % m.codes.length] : null;
+      seq += 1;
+      push(dateStr, m.target, code, m.note(slot), m.by, `reports://2026M${dateStr.slice(5, 7)}/${m.uri}`);
+    }
+    seq = 0;
+  }
+  // 每季度（3/15、6/15、9/5）
+  const quarterly = [
+    { target: "medicalWater", code: "PMP-002", by: "血透中心", uri: "medical-water.pdf", note: "血透用水细菌内毒素与电导率检测（季度）" },
+    { target: "nonTraditionalWater", code: "PMP-004", by: "后勤工程部", uri: "reclaimed-water.pdf", note: "雨水收集池水质与中水回用检测（季度）" },
+    { target: "hvac", code: "AHU-002", by: "后勤工程部", uri: "hvac-water.pdf", note: "空调冷却水、冷冻水水质检测与军团菌筛查（季度）" },
+    { target: "indoorEnv", code: null, by: "后勤保障部", uri: "indoor-env.pdf", note: "门诊及住院病区噪声、照度、CO2 浓度检测（季度）" },
+  ];
+  for (const dateStr of ["2026-03-15", "2026-06-15", "2026-09-05"])
+    for (const q of quarterly)
+      push(dateStr, q.target, q.code, q.note, q.by, `reports://2026Q${Math.ceil(Number(dateStr.slice(5, 7)) / 3)}/${q.uri}`);
+  // 年度检测
+  push("2026-06-12", "radiation", null, "放射科机房防护年度检测", "放射防护组", "reports://2026/radiation.pdf");
+  // 不合格项（闭环：转工单整改）
+  for (const r of rows) {
+    if (r.target === "sewage" && r.date === "2026-06-20") {
+      r.result = "fail";
+      r.note = "污水站出水 COD 超标，已转工单整改，复检后达标";
+    }
+    if (r.target === "medicalGas" && r.date === "2026-05-20") {
+      r.result = "fail";
+      r.note = "ICU 氧气终端压力偏低，已转工单整改并复检合格";
+    }
+  }
+  rows.sort((a, b) => (a.date + a.target).localeCompare(b.date + b.target));
   return rows.map((r, i) => {
     const device = r.code ? byCode(r.code) : null;
     return {
@@ -196,9 +396,9 @@ function createDemoInspections(devices) {
       result: r.result,
       date: r.date,
       note: r.note,
-      reportUri: r.reportUri,
+      reportUri: r.uri,
       createdAt: `${r.date}T10:00:00+08:00`,
-      createdBy: "system",
+      createdBy: r.by,
       dataset: RECORDS_DATASET_ID,
       source: "synthetic",
     };

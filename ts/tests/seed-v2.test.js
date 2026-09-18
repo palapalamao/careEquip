@@ -23,8 +23,8 @@ test("F-A: seed v2 records are add-only, replay guarded and reference v1 devices
     assert.ok(!v1Ids.has(r.id.val), `v2 id 与 v1 冲突: ${r.id.val}`);
   }
   assert.equal(records.filter((r) => r.dmDoc).length, 48);
-  assert.equal(records.filter((r) => r.dmWorkOrder).length, 4);
-  assert.equal(records.filter((r) => r.dmInspection).length, 5);
+  assert.equal(records.filter((r) => r.dmWorkOrder).length, 130);
+  assert.equal(records.filter((r) => r.dmInspection).length, 65);
   const wo = records.filter((r) => r.dmWorkOrder);
   assert.ok(wo.every((r) => ["open", "inProgress", "closed"].includes(r.dmWoStatus)));
 });
