@@ -2,16 +2,23 @@
 //   I-R2 loadDeviceTimeline / I-R3 loadWorkOrders / I-R4 loadInspections
 //   I-W1 createWorkOrder / I-W2 transitWorkOrder / I-W3 saveDeviceProfile / I-W4 createInspection
 // demo = 本地模拟（内存存储，可增改状态）；fin = FIN 项目（读 readAll，写 lib 受控函数）。
-import { createDataset, RECORDS_DATASET_ID } from "./fixtures";
+import {
+  createDataset,
+  RECORDS_DATASET_ID,
+  planSystemName,
+  planExecResultName,
+} from "./fixtures.js";
 import {
   normalizeFinRows,
   normalizeHistoryRows,
   normalizeInspectionRows,
+  normalizePlanRows,
+  normalizePlanExecRows,
   normalizeWorkOrderRows,
   resolveProject,
   assertWoTransition,
   profilePatchOf,
-} from "./model";
+} from "./model.js";
 
 let demoStore = null;
 function getDemoStore() {
@@ -287,3 +294,91 @@ export async function loadHistory(pointId, signal) {
   return normalizeHistoryRows(grid.toJSON().rows || []);
 }
 
+
+// I-R11 计划与执行记录
+export async function loadPlans(mode, signal) {
+  if (mode === "demo") {
+    const store = getDemoStore();
+    return { plans: [...store.plans], planExecs: [...store.planExecs] };
+  }
+  const [planRows, execRows] = await Promise.all([
+    finEval("readAll(dmPlan, {limit:1000})", signal),
+    finEval("readAll(dmPlanExec, {limit:1000})", signal),
+  ]);
+  const plans = normalizePlanRows(planRows);
+  const plansById = new Map(plans.map((p) => [p.id, p]));
+  return { plans, planExecs: normalizePlanExecRows(execRows, plansById) };
+}
+
+// I-W8 新建运行计划（同系统同周期拒绝重复）
+export async function createPlan(mode, payload) {
+  const { system, period, content } = payload;
+  if (!system) throw new Error("必须选择系统");
+  if (!/^\d{4}-\d{2}$/.test(period || "")) throw new Error("周期格式应为 YYYY-MM");
+  if (!content?.trim()) throw new Error("必须填写计划内容");
+  if (mode === "demo") {
+    const store = getDemoStore();
+    if (store.plans.some((p) => p.system === system && p.period === period))
+      throw new Error("该系统该周期已有计划");
+    const plan = {
+      id: `dm-local-plan-${String(store.plans.length + 1).padStart(3, "0")}`,
+      system,
+      systemName: planSystemName(system),
+      period,
+      content: content.trim(),
+      createdAt: nowIso(),
+      createdBy: "local-demo",
+      dataset: RECORDS_DATASET_ID,
+      source: "synthetic",
+    };
+    store.plans = [plan, ...store.plans];
+    return { id: plan.id };
+  }
+  await finEval(
+    `dmCreatePlan(${axonDict({
+      dmPlanSystem: system,
+      dmPlanPeriod: period,
+      dmPlanContent: content.trim(),
+      dmDataset: RECORDS_DATASET_ID,
+    })})`,
+  );
+  return { id: null };
+}
+
+// I-W8 执行登记（校验计划存在与结果枚举）
+export async function recordPlanExec(mode, payload) {
+  const { planId, date, result, note } = payload;
+  if (!planId) throw new Error("必须选择计划");
+  if (!date) throw new Error("必须选择执行日期");
+  if (!["done", "partial", "missed"].includes(result))
+    throw new Error("执行结果必须为 完成/部分完成/未完成");
+  if (mode === "demo") {
+    const store = getDemoStore();
+    const plan = store.plans.find((p) => p.id === planId);
+    if (!plan) throw new Error(`计划不存在：${planId}`);
+    const exec = {
+      id: `dm-local-exec-${String(store.planExecs.length + 1).padStart(3, "0")}`,
+      planId,
+      date,
+      result,
+      resultName: planExecResultName(result),
+      note: note?.trim() || "",
+      createdAt: nowIso(),
+      createdBy: "local-demo",
+      dataset: RECORDS_DATASET_ID,
+      source: "synthetic",
+    };
+    store.planExecs = [exec, ...store.planExecs];
+    return { id: exec.id };
+  }
+  await finEval(
+    `dmRecordPlanExec(${axonDict({
+      dmPlanRef: axonRef(planId),
+      dmExecDate: date,
+      dmExecResult: result,
+      dmExecNote: note?.trim() || undefined,
+      dmDataset: RECORDS_DATASET_ID,
+    })})`,
+  );
+  return { id: null };
+}

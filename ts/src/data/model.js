@@ -1,4 +1,9 @@
 // F-A: FIN 行归一化扩展（I-R1 档案字段 / I-R2 时间线 / I-R3 工单 / I-R4 检测）
+import {
+  PLAN_SYSTEMS,
+  planSystemName,
+  planExecResultName,
+} from "./fixtures.js";
 const unwrap = (v) =>
   v && typeof v === "object" ? (v.val ?? v.value ?? null) : v;
 
@@ -287,4 +292,132 @@ export function inspectionsToCsv(rows) {
     i.source === "synthetic" ? "Synthetic / 模拟数据" : "Unknown / 未知来源",
   ]);
   return "﻿" + [head, ...body].map((r) => r.map(safe).join(",")).join("\r\n");
+}
+
+// ============ F-C I-R11：运行计划 / 执行登记归一化 + 年度考核（9.2.6）============
+export function normalizePlanRows(rows) {
+  return rows
+    .map((row) => {
+      const get = (key) => unwrap(row[key]);
+      const synthetic =
+        row.dmSynthetic === true || row.dmSynthetic?._kind === "marker";
+      const system = get("dmPlanSystem") || "";
+      return {
+        id: get("id") || "",
+        system,
+        systemName: planSystemName(system),
+        period: get("dmPlanPeriod") || "",
+        content: get("dmPlanContent") || "",
+        createdAt: get("dmCreatedAt") || null,
+        createdBy: get("dmCreatedBy") || "unknown",
+        dataset: get("dmDataset") || "unknown",
+        source: synthetic ? "synthetic" : "unknown",
+      };
+    })
+    .sort((a, b) => String(b.period).localeCompare(String(a.period)));
+}
+export function normalizePlanExecRows(rows, plansById = new Map()) {
+  return rows
+    .map((row) => {
+      const get = (key) => unwrap(row[key]);
+      const synthetic =
+        row.dmSynthetic === true || row.dmSynthetic?._kind === "marker";
+      const planId = get("dmPlanRef") || "";
+      const plan = plansById.get(planId) || {};
+      const result = get("dmExecResult") || "done";
+      return {
+        id: get("id") || "",
+        planId,
+        system: plan.system || "",
+        systemName: plan.systemName || planSystemName(plan.system || ""),
+        period: plan.period || "",
+        date: get("dmExecDate") || null,
+        result,
+        resultName: planExecResultName(result),
+        note: get("dmExecNote") || "",
+        createdAt: get("dmCreatedAt") || null,
+        createdBy: get("dmCreatedBy") || "unknown",
+        dataset: get("dmDataset") || "unknown",
+        source: synthetic ? "synthetic" : "unknown",
+      };
+    })
+    .sort((a, b) => String(b.date).localeCompare(String(a.date)));
+}
+
+// F-C R-C.3：年度考核——按系统汇总计划执行情况，给出结论（不写回记录，可导出）
+// 口径：应执行=该年计划数；无登记的计划计未登记；完成率=完成/应执行
+export function buildAnnualReview(plans, planExecs, year) {
+  const yearPlans = plans.filter((p) => String(p.period).startsWith(String(year)));
+  const execCountByPlan = new Map();
+  for (const e of planExecs) {
+    if (!String(e.period).startsWith(String(year))) continue;
+    execCountByPlan.set(e.planId, (execCountByPlan.get(e.planId) || 0) + 1);
+  }
+  return PLAN_SYSTEMS.map((system) => {
+    const sysPlans = yearPlans.filter((p) => p.system === system.id);
+    const sysExecs = planExecs.filter(
+      (e) => e.system === system.id && String(e.period).startsWith(String(year)),
+    );
+    const done = sysExecs.filter((e) => e.result === "done").length;
+    const partial = sysExecs.filter((e) => e.result === "partial").length;
+    const missed = sysExecs.filter((e) => e.result === "missed").length;
+    const unregistered = sysPlans.filter((p) => !execCountByPlan.has(p.id)).length;
+    const total = sysPlans.length;
+    const completionRate = total ? Math.round((done / total) * 100) : null;
+    const conclusion =
+      total === 0 ? "未制定计划" :
+      completionRate >= 90 ? "优秀" :
+      completionRate >= 75 ? "合格" :
+      completionRate >= 60 ? "基本合格" : "不合格";
+    return {
+      system: system.id,
+      systemName: system.name,
+      year,
+      total,
+      done,
+      partial,
+      missed,
+      unregistered,
+      completionRate,
+      conclusion,
+    };
+  });
+}
+
+// F-C R-C.1/R-C.2 导出：计划及执行登记
+export function plansToCsv(plans, planExecs) {
+  const safe = (value) => {
+    let text = String(value ?? "");
+    if (/^[\s]*[=+@-]/.test(text)) text = `'${text}`;
+    return `"${text.replaceAll('"', '""')}"`;
+  };
+  const execByPlan = new Map();
+  for (const e of planExecs) {
+    const list = execByPlan.get(e.planId) || [];
+    list.push(`${e.date}:${e.resultName}${e.note ? "（" + e.note + "）" : ""}`);
+    execByPlan.set(e.planId, list);
+  }
+  const rows = [
+    ["计划ID", "系统", "周期", "计划内容", "执行登记"],
+    ...plans.map((p) => [
+      p.id, p.systemName, p.period, p.content, (execByPlan.get(p.id) || []).join("；") || "未登记",
+    ]),
+  ];
+  return "﻿" + rows.map((r) => r.map(safe).join(",")).join("\r\n");
+}
+// F-C R-C.3 导出：年度考核汇总
+export function annualReviewToCsv(review) {
+  const safe = (value) => {
+    let text = String(value ?? "");
+    if (/^[\s]*[=+@-]/.test(text)) text = `'${text}`;
+    return `"${text.replaceAll('"', '""')}"`;
+  };
+  const rows = [
+    ["年度", "系统", "计划数(应执行)", "完成", "部分完成", "未完成", "未登记", "完成率(%)", "考核结论"],
+    ...review.map((r) => [
+      r.year, r.systemName, r.total, r.done, r.partial, r.missed, r.unregistered,
+      r.completionRate ?? "—", r.conclusion,
+    ]),
+  ];
+  return "﻿" + rows.map((r) => r.map(safe).join(",")).join("\r\n");
 }

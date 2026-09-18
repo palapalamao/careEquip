@@ -8,6 +8,7 @@ import {
   Building2,
   ChevronLeft,
   ChevronRight,
+  Calendar,
   ClipboardList,
   Cpu,
   Download,
@@ -38,6 +39,7 @@ import StatusBadge from "@/components/StatusBadge";
 import DeviceDetail from "@/components/DeviceDetail";
 import WorkOrdersPage from "@/pages/WorkOrders";
 import InspectionsPage from "@/pages/Inspections";
+import PlansPage from "@/pages/Plans";
 const ICONS = {
   hvac: Fan,
   power: Zap,
@@ -54,6 +56,7 @@ const PAGE_NAMES = {
   alarms: "异常设备",
   workorders: "运维工单",
   inspections: "检测记录",
+  plans: "运行计划",
 };
 const initialMode = () =>
   new URLSearchParams(window.location.search).get("mode") === "demo"
@@ -206,6 +209,10 @@ export default function App() {
           <NavLink to="/inspections">
             <FileCheck2 size={18} />
             检测记录
+          </NavLink>
+          <NavLink to="/plans">
+            <Calendar size={18} />
+            运行计划
           </NavLink>
         </nav>
         <div className="sidebar-section">设备系统</div>
@@ -626,6 +633,12 @@ export default function App() {
                 />
               ) : page === "inspections" ? (
                 <InspectionsPage
+                  mode={mode}
+                  devices={devices}
+                  onChanged={() => setRevision((v) => v + 1)}
+                />
+              ) : page === "plans" ? (
+                <PlansPage
                   mode={mode}
                   devices={devices}
                   onChanged={() => setRevision((v) => v + 1)}

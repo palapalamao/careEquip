@@ -1130,3 +1130,53 @@ tbody tr:hover {
   color: #9db2b7;
 }
 
+/* F-C 运行计划与执行考核 */
+.tab-group {
+  display: flex;
+  gap: 6px;
+}
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 14px;
+  border: 1px solid var(--line);
+  border-radius: 5px;
+  background: #fff;
+  color: var(--muted);
+  font-size: 13.5px;
+  cursor: pointer;
+}
+.tab--active {
+  border-color: #1f6f7a;
+  color: #16343b;
+  background: #eef6f7;
+  font-weight: 600;
+}
+.inline-form {
+  display: grid;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--line);
+  background: #f7fafb;
+}
+.inline-form h3 {
+  margin: 0;
+  font-size: 15px;
+  color: #16343b;
+}
+.exec-line {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.exec-line + .exec-line {
+  margin-top: 6px;
+}
+.review-note {
+  margin: 12px 20px 16px;
+  font-size: 12.5px;
+  line-height: 1.7;
+  color: var(--muted);
+}

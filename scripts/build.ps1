@@ -8,7 +8,9 @@ $dependencyDir = Join-Path $FanHome 'lib\fan'
 foreach ($dependency in @('finBuild','skyarc','skyarcd','haystack','axon','finStackCoreExt')) {
   if (-not (Test-Path -LiteralPath (Join-Path $dependencyDir "$dependency.pod"))) { throw "Missing dependency: $dependency" }
 }
-& node (Join-Path $PSScriptRoot 'bump-version.mjs') patch
+$bump = $env:DM_BUMP
+if (-not $bump) { $bump = 'patch' }
+& node (Join-Path $PSScriptRoot 'bump-version.mjs') $bump
 if ($LASTEXITCODE -ne 0) { throw 'Version bump failed' }
 Push-Location (Join-Path $projectRoot 'ts')
 try {
@@ -23,6 +25,8 @@ try {
   if ($LASTEXITCODE -ne 0) { throw 'Synthetic data preview generation failed' }
   & node scripts/prepare-seed-v2.mjs
   if ($LASTEXITCODE -ne 0) { throw 'Synthetic records v2 preview generation failed' }
+  & node scripts/prepare-seed-v3.mjs
+  if ($LASTEXITCODE -ne 0) { throw 'Synthetic plans v3 preview generation failed' }
   & $fanBin scripts/validate-axon.fan ($projectRoot.Replace('\','/') + '/')
   if ($LASTEXITCODE -ne 0) { throw 'Menu or seed Axon syntax validation failed' }
   & $fanBin build.fan

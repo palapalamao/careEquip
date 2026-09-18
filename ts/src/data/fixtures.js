@@ -113,12 +113,16 @@ export function createDataset() {
       ts: SNAPSHOT_TIME,
       source: "synthetic",
     }));
+  const plans = createDemoPlans();
+  const planExecs = createDemoPlanExecs(plans);
   return {
     devices,
     alarms,
     docs: createDemoDocs(devices),
     workOrders: createDemoWorkOrders(devices),
     inspections: createDemoInspections(devices),
+    plans: plans,
+    planExecs: planExecs,
     source: "synthetic",
     dataset: DATASET_ID,
     updatedAt: SNAPSHOT_TIME,
@@ -405,3 +409,120 @@ function createDemoInspections(devices) {
     };
   });
 }
+
+// ============ F-C 运行计划与执行考核（R-C / 9.2.6）============
+// 计划系统枚举（03 §9 dmPlanSystem；module 供"转工单"推荐关联设备）
+export const PLAN_SYSTEMS = [
+  { id: "medicalGas", name: "医用气体", module: "medical-space" },
+  { id: "elec", name: "电力", module: "power" },
+  { id: "hvac", name: "空调", module: "hvac" },
+  { id: "water", name: "供水", module: "water" },
+  { id: "steam", name: "蒸汽", module: "water" },
+  { id: "heating", name: "供热", module: "water" },
+];
+export const PLAN_EXEC_RESULTS = [
+  { id: "done", name: "完成" },
+  { id: "partial", name: "部分完成" },
+  { id: "missed", name: "未完成" },
+];
+const planSystemName = (id) => PLAN_SYSTEMS.find((s) => s.id === id)?.name || id;
+const planExecResultName = (id) => PLAN_EXEC_RESULTS.find((r) => r.id === id)?.name || id;
+export { planSystemName, planExecResultName };
+
+// 各系统月度运行计划内容库（三甲后勤口径，9.2.6 计划科学合理）
+const PLAN_CONTENT = {
+  medicalGas: [
+    "医用气体汇流排巡检与备用瓶组切换演练",
+    "手术室医用气体终端压力与泄漏检查",
+    "液氧站液位、汽化器结霜与管网压力巡检",
+  ],
+  elec: [
+    "供配电系统红外测温与负荷记录",
+    "柴油发电机空载试运行与蓄电池检查",
+    "UPS 电源切换测试与电容温度检查",
+    "无功补偿装置投切情况检查",
+  ],
+  hvac: [
+    "中央空调机组巡检与运行参数记录",
+    "冷却水、冷冻水水质处理与加药",
+    "手术室净化空调过滤器压差检查",
+    "新风机组皮带、轴承与风阀检查",
+  ],
+  water: [
+    "生活供水泵组保养与管网压力检查",
+    "二次供水水箱清洗消毒与末梢水检测",
+    "污水站设备运行巡检与出水水质监测",
+    "雨水及中水回用系统检查",
+  ],
+  steam: [
+    "蒸汽锅炉水质化验与安全附件校验",
+    "蒸汽管网疏水阀与保温层巡检",
+    "灭菌蒸汽压力稳定性检查（消毒供应中心）",
+  ],
+  heating: [
+    "换热站一二次网运行参数记录与调节",
+    "供热管网平衡调节与用户侧室温抽测",
+    "板式换热器清洗与压降检查",
+  ],
+};
+
+// F-C R-C.1：确定性月度运行计划（2026-01 ~ 2026-09，6 系统 × 9 周期）
+function createDemoPlans() {
+  const periods = ["2026-01","2026-02","2026-03","2026-04","2026-05","2026-06","2026-07","2026-08","2026-09"];
+  const plans = [];
+  for (const system of PLAN_SYSTEMS) {
+    const bank = PLAN_CONTENT[system.id];
+    periods.forEach((period, i) => {
+      plans.push({
+        id: `dm-demo-plan-${system.id}-${period}`,
+        system: system.id,
+        systemName: system.name,
+        period,
+        content: bank[i % bank.length],
+        createdAt: `${period}-01T09:00:00+08:00`,
+        createdBy: "后勤工程部",
+        dataset: RECORDS_DATASET_ID,
+        source: "synthetic",
+      });
+    });
+  }
+  return plans;
+}
+
+// F-C R-C.2：确定性执行登记（历史月基本执行，含少量部分完成/未完成用于考核）
+function createDemoPlanExecs(plans) {
+  const rng = mulberry32(9266);
+  const execs = [];
+  let seq = 0;
+  for (const plan of plans) {
+    const month = Number(plan.period.slice(5, 7));
+    if (plan.period >= "2026-09") continue; // 当月（快照月）尚未登记
+    let result;
+    if (plan.system === "medicalGas" && plan.period === "2026-02") result = "missed"; // 春节值班人手不足
+    else if (plan.system === "hvac" && plan.period === "2026-07") result = "partial"; // 高温保供期间部分完成
+    else if (plan.system === "steam" && plan.period === "2026-06") result = "partial";
+    else {
+      const r = rng();
+      result = r < 0.86 ? "done" : r < 0.96 ? "partial" : "missed";
+    }
+    seq += 1;
+    const note =
+      result === "done" ? "" :
+      result === "partial" ? "高温保供/装修交叉作业影响，未完成项已顺延并跟踪" : "值班人手不足未执行，已列入年度考核改进项";
+    execs.push({
+      id: `dm-demo-exec-${String(seq).padStart(3, "0")}`,
+      planId: plan.id,
+      date: `${plan.period}-${String(10 + Math.floor(rng() * 15)).padStart(2, "0")}`,
+      result,
+      resultName: planExecResultName(result),
+      note,
+      createdAt: `${plan.period}-${String(20).padStart(2, "0")}T10:00:00+08:00`,
+      createdBy: "后勤工程部",
+      dataset: RECORDS_DATASET_ID,
+      source: "synthetic",
+    });
+  }
+  return execs;
+}
+
+// createDataset 组装：plans/planExecs 在 return 前生成（见上）
