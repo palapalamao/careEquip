@@ -8,6 +8,8 @@ $dependencyDir = Join-Path $FanHome 'lib\fan'
 foreach ($dependency in @('finBuild','skyarc','skyarcd','haystack','axon','finStackCoreExt')) {
   if (-not (Test-Path -LiteralPath (Join-Path $dependencyDir "$dependency.pod"))) { throw "Missing dependency: $dependency" }
 }
+& node (Join-Path $PSScriptRoot 'bump-version.mjs') patch
+if ($LASTEXITCODE -ne 0) { throw 'Version bump failed' }
 Push-Location (Join-Path $projectRoot 'ts')
 try {
   & npm ci --no-audit --no-fund

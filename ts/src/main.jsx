@@ -3,6 +3,9 @@ import { createRoot } from "react-dom/client";
 import { HashRouter, Routes, Route, Navigate } from "react-router-dom";
 import App from "./App";
 import "./styles.css";
+import { enforceLatestBuild } from "./versionCheck";
+
+enforceLatestBuild();
 class ErrorBoundary extends React.Component {
   state = { error: false };
   static getDerivedStateFromError() {
