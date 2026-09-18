@@ -1180,3 +1180,5 @@ tbody tr:hover {
   line-height: 1.7;
   color: var(--muted);
 }
+
+.saved-mark { color: var(--ok, #2e7d32); font-size: 12px; }

@@ -344,6 +344,47 @@ export function normalizePlanExecRows(rows, plansById = new Map()) {
     .sort((a, b) => String(b.date).localeCompare(String(a.date)));
 }
 
+
+// F-C I-R13：年度考核结论记录归一化（dmPlanReviewRec，v0.3.2 落库）
+export function normalizeReviewRows(rows) {
+  return rows
+    .map((row) => {
+      const get = (key) => unwrap(row[key]);
+      const synthetic =
+        row.dmSynthetic === true || row.dmSynthetic?._kind === "marker";
+      const system = get("dmReviewSystem") || "";
+      const summary = row.dmReviewSummary || {};
+      const unwrapNum = (v) => {
+        const x = unwrap(v);
+        return typeof x === "number" ? x : Number(x ?? 0) || 0;
+      };
+      const total = unwrapNum(summary.total);
+      const done = unwrapNum(summary.done);
+      return {
+        id: get("id") || "",
+        system,
+        systemName: planSystemName(system),
+        year: get("dmReviewYear") || "",
+        summary: {
+          total,
+          done,
+          partial: unwrapNum(summary.partial),
+          missed: unwrapNum(summary.missed),
+          unregistered: unwrapNum(summary.unregistered),
+          completionRate:
+            summary.completionRate != null && summary.completionRate !== ""
+              ? Number(summary.completionRate)
+              : total ? Math.round((done / total) * 100) : null,
+        },
+        conclusion: get("dmReviewConclusion") || "",
+        savedAt: get("dmReviewSavedAt") || null,
+        savedBy: get("dmReviewSavedBy") || "unknown",
+        source: synthetic ? "synthetic" : "unknown",
+      };
+    })
+    .sort((a, b) => String(b.year).localeCompare(String(a.year)) || a.system.localeCompare(b.system));
+}
+
 // F-C R-C.3：年度考核——按系统汇总计划执行情况，给出结论（不写回记录，可导出）
 // 口径：应执行=该年计划数；无登记的计划计未登记；完成率=完成/应执行
 export function buildAnnualReview(plans, planExecs, year) {

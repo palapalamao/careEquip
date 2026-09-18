@@ -91,7 +91,11 @@ export default function WorkOrdersPage({ mode, devices, onChanged }) {
   const transit = async (order, target) => {
     let note = "";
     if (target === "closed") {
-      note = window.prompt("关闭说明（写入留痕）", "") ?? "";
+      note = window.prompt("执行结果（必填，写入留痕）", "") ?? "";
+      if (!note.trim()) {
+        setActionError("关闭工单必须填写执行结果（dmWoResult 必填）");
+        return;
+      }
     }
     setBusy(`正在更新 ${order.id}…`);
     setActionError("");

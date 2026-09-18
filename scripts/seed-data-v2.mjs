@@ -7,7 +7,7 @@ import { createDataset, DATASET_ID, RECORDS_DATASET_ID } from "../ts/src/data/fi
 const marker = { _kind: "marker" };
 const ref = (val) => ({ _kind: "ref", val });
 export function createSeedRecordsV2() {
-  const { devices, docs, workOrders, inspections } = createDataset();
+  const { devices, docs, workOrders, inspections } = createDataset({ exhaust: false });
   const deviceIds = new Set(devices.map((d) => d.id));
   const common = {
     dmSynthetic: marker,

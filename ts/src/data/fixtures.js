@@ -34,7 +34,8 @@ export const INSPECT_TARGETS = [
   { id: "medicalGas", name: "医用气体" },
   { id: "hvac", name: "空调系统" },
   { id: "sewage", name: "污水处理" },
-  { id: "medicalWaste", name: "医疗废物" },
+  { id: "medicalWaste", name: "医疗废物处理" },
+  { id: "medicalExhaust", name: "医疗废气排放" },
   { id: "radiation", name: "射线防护" },
   { id: "indoorEnv", name: "室内环境" },
 ];
@@ -55,7 +56,7 @@ const inspectTargetName = (id) => INSPECT_TARGETS.find((t) => t.id === id)?.name
 const docTypeName = (id) => DOC_TYPES.find((t) => t.id === id)?.name || id;
 export { woTypeName, inspectTargetName, docTypeName };
 
-export function createDataset() {
+export function createDataset(options = {}) {
   const states = ["running", "running", "fault", "stopped", "offline", "unknown"];
   const devices = MODULES.flatMap((module, mi) =>
     Array.from({ length: 6 }, (_, i) => {
@@ -120,9 +121,10 @@ export function createDataset() {
     alarms,
     docs: createDemoDocs(devices),
     workOrders: createDemoWorkOrders(devices),
-    inspections: createDemoInspections(devices),
+    inspections: createDemoInspections(devices, { exhaust: options.exhaust !== false }),
     plans: plans,
     planExecs: planExecs,
+    reviews: createDemoPlanReviews(),
     source: "synthetic",
     dataset: DATASET_ID,
     updatedAt: SNAPSHOT_TIME,
@@ -336,7 +338,7 @@ function createDemoWorkOrders(devices) {
 
 // F-A R2.2：三甲医院规模确定性模拟定期检测记录（对应标准 9.1.2 检测对象）
 // 覆盖 9 类检测对象：4 类每月 2 次、4 类每季度、射线防护年度，共 65 条
-function createDemoInspections(devices) {
+function createDemoInspections(devices, { exhaust = true } = {}) {
   const byCode = (code) => devices.find((d) => d.code === code);
   const rows = [];
   const push = (dateStr, target, code, note, by, uri, result = "pass") =>
@@ -370,6 +372,7 @@ function createDemoInspections(devices) {
     { target: "nonTraditionalWater", code: "PMP-004", by: "后勤工程部", uri: "reclaimed-water.pdf", note: "雨水收集池水质与中水回用检测（季度）" },
     { target: "hvac", code: "AHU-002", by: "后勤工程部", uri: "hvac-water.pdf", note: "空调冷却水、冷冻水水质检测与军团菌筛查（季度）" },
     { target: "indoorEnv", code: null, by: "后勤保障部", uri: "indoor-env.pdf", note: "门诊及住院病区噪声、照度、CO2 浓度检测（季度）" },
+    ...(exhaust ? [{ target: "medicalExhaust", code: null, by: "院感科", uri: "medical-exhaust.pdf", note: "检验科、病理科废气及消毒供应中心排气检测（季度）" }] : []),
   ];
   for (const dateStr of ["2026-03-15", "2026-06-15", "2026-09-05"])
     for (const q of quarterly)
@@ -420,6 +423,7 @@ export const PLAN_SYSTEMS = [
   { id: "steam", name: "蒸汽", module: "water" },
   { id: "heating", name: "供热", module: "water" },
 ];
+export const PLAN_REVIEW_CONCLUSIONS = ["优秀", "合格", "基本合格", "不合格"];
 export const PLAN_EXEC_RESULTS = [
   { id: "done", name: "完成" },
   { id: "partial", name: "部分完成" },
@@ -523,6 +527,36 @@ function createDemoPlanExecs(plans) {
     });
   }
   return execs;
+}
+
+
+// F-C R-C.3：2025 年度考核结论（去年已考核落库，跨年可查）
+function createDemoPlanReviews() {
+  const rows = [
+    { system: "medicalGas", total: 12, done: 12, partial: 0, missed: 0, unregistered: 0 },
+    { system: "elec", total: 12, done: 11, partial: 1, missed: 0, unregistered: 0 },
+    { system: "hvac", total: 12, done: 10, partial: 2, missed: 0, unregistered: 0 },
+    { system: "water", total: 12, done: 12, partial: 0, missed: 0, unregistered: 0 },
+    { system: "steam", total: 12, done: 9, partial: 2, missed: 1, unregistered: 0 },
+    { system: "heating", total: 12, done: 12, partial: 0, missed: 0, unregistered: 0 },
+  ];
+  return rows.map((r) => {
+    const completionRate = Math.round((r.done / r.total) * 100);
+    return {
+      id: "dm-demo-review-" + r.system + "-2025",
+      system: r.system,
+      systemName: planSystemName(r.system),
+      year: "2025",
+      summary: { ...r, completionRate },
+      conclusion:
+        completionRate >= 90 ? "优秀" :
+        completionRate >= 75 ? "合格" :
+        completionRate >= 60 ? "基本合格" : "不合格",
+      savedAt: "2026-01-10T10:00:00+08:00",
+      savedBy: "后勤工程部",
+      source: "synthetic",
+    };
+  });
 }
 
 // createDataset 组装：plans/planExecs 在 return 前生成（见上）

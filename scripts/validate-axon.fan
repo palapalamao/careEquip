@@ -14,9 +14,12 @@ class ValidateAxon {
     v2 := root + `output/seed-deviceManager-v2.axon`
     Parser(Loc(v2.name, 1), ("() => " + v2.readAllStr).in).parseTop("dmSeedV2Preview", Etc.emptyDict)
     v3 := root + `output/seed-deviceManager-v3.axon`
+    v4 := root + `output/seed-deviceManager-v4.axon`
     if (v3.exists) {
       Parser(Loc(v3.name, 1), ("() => " + v3.readAllStr).in).parseTop("dmSeedV3Preview", Etc.emptyDict)
-      echo("Axon parsed: menu, seed v1/v2/v3; nothing evaluated or written")
+      if (v4.exists)
+        Parser(Loc(v4.name, 1), ("() => " + v4.readAllStr).in).parseTop("dmSeedV4Preview", Etc.emptyDict)
+      echo("Axon parsed: menu, seed v1/v2/v3/v4; nothing evaluated or written")
     } else {
       echo("Axon parsed: menu, seed v1/v2; nothing evaluated or written")
     }

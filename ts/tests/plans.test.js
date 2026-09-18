@@ -4,12 +4,14 @@ import { createDataset, PLAN_SYSTEMS } from "../src/data/fixtures.js";
 import {
   normalizePlanRows,
   normalizePlanExecRows,
+  normalizeReviewRows,
   buildAnnualReview,
 } from "../src/data/model.js";
-import { loadPlans, createPlan, recordPlanExec } from "../src/data/provider.js";
+import { loadPlans, createPlan, recordPlanExec, savePlanReview } from "../src/data/provider.js";
 import {
   createSeedRecordsV3,
 } from "../../scripts/seed-data-v3.mjs";
+import { createSeedRecordsV4 } from "../../scripts/seed-data-v4.mjs";
 
 const ref = (val) => ({ _kind: "ref", val });
 const marker = { _kind: "marker" };
@@ -109,4 +111,65 @@ test("F-C: seed v3 records are add-only, replay guarded and reference closed", (
     assert.ok(r.dmDataset === "deviceManager-demo-v2");
     if (r.dmPlanExec) assert.ok(planIds.has(r.dmPlanRef.val), `悬空计划引用: ${r.dmPlanRef.val}`);
   }
+});
+
+test("F-C: FIN review rows normalize with saved conclusion (I-R13)", () => {
+  const rows = normalizeReviewRows([
+    {
+      id: ref("p:mytest:r:dm-review-1"),
+      dmPlanReviewRec: marker,
+      dmReviewSystem: "hvac",
+      dmReviewYear: "2026",
+      dmReviewSummary: { total: 9, done: 8, partial: 1, missed: 0, unregistered: 0, completionRate: 89 },
+      dmReviewConclusion: "合格",
+      dmReviewSavedAt: "2027-01-10T10:00:00+08:00",
+      dmReviewSavedBy: "后勤工程部",
+    },
+  ]);
+  assert.equal(rows[0].systemName, "空调");
+  assert.equal(rows[0].conclusion, "合格");
+  assert.equal(rows[0].summary.completionRate, 89);
+});
+
+test("F-C: demo savePlanReview upserts per system+year (I-W10)", async () => {
+  const before = (await loadPlans("demo")).reviews.length;
+  await savePlanReview("demo", {
+    system: "hvac",
+    year: "2026",
+    summary: { total: 9, done: 8, partial: 1, missed: 0, unregistered: 0, completionRate: 89 },
+    conclusion: "合格",
+  });
+  let reviews = (await loadPlans("demo")).reviews;
+  assert.equal(reviews.length, before + 1);
+  await savePlanReview("demo", {
+    system: "hvac",
+    year: "2026",
+    summary: { total: 9, done: 9, partial: 0, missed: 0, unregistered: 0, completionRate: 100 },
+    conclusion: "优秀",
+  });
+  reviews = (await loadPlans("demo")).reviews;
+  assert.equal(reviews.length, before + 1); // 覆盖更新，不新增
+  assert.equal(reviews.find((r) => r.system === "hvac" && r.year === "2026").conclusion, "优秀");
+  await assert.rejects(
+    savePlanReview("demo", { system: "hvac", year: "2026-01", summary: {}, conclusion: "合格" }),
+    /YYYY/,
+  );
+});
+
+test("F-A: closing a work order requires a result (demo mirrors I-W2)", async () => {
+  const { transitWorkOrder } = await import("../src/data/provider.js");
+  const data = createDataset();
+  const open = data.workOrders.find((w) => w.status === "inProgress") || data.workOrders[0];
+  await assert.rejects(transitWorkOrder("demo", open.id, "closed", ""), /执行结果/);
+  await assert.rejects(transitWorkOrder("demo", open.id, "closed", "   "), /执行结果/);
+});
+
+test("F-A: seed v4 exhaust inspections are add-only and reference v2 dataset", () => {
+  const records = createSeedRecordsV4();
+  assert.ok(records.length >= 3);
+  assert.ok(records.every((r) => r.dmInspection && r.dmSynthetic));
+  assert.ok(records.every((r) => r.dmInspectTarget === "medicalExhaust"));
+  assert.ok(records.every((r) => r.dmInspectResult === "pass"));
+  const ids = records.map((r) => r.id.val);
+  assert.equal(new Set(ids).size, ids.length);
 });

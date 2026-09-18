@@ -21,7 +21,7 @@ import {
   plansToCsv,
   annualReviewToCsv,
 } from "@/data/model";
-import { loadPlans, createPlan, recordPlanExec, createWorkOrder } from "@/data/provider";
+import { loadPlans, createPlan, recordPlanExec, createWorkOrder, savePlanReview } from "@/data/provider";
 
 function downloadCsv(text, filename) {
   const url = URL.createObjectURL(
@@ -40,7 +40,7 @@ const todayStr = () => {
 };
 
 export default function PlansPage({ mode, devices, onChanged }) {
-  const [state, setState] = useState({ loading: true, plans: [], planExecs: [], error: "" });
+  const [state, setState] = useState({ loading: true, plans: [], planExecs: [], reviews: [], error: "" });
   const [tab, setTab] = useState("plans");
   const [system, setSystem] = useState("all");
   const [search, setSearch] = useState("");
@@ -58,11 +58,11 @@ export default function PlansPage({ mode, devices, onChanged }) {
     loadPlans(mode, signal).then(
       (data) => setState({ loading: false, ...data, error: "" }),
       (error) =>
-        setState({ loading: false, plans: [], planExecs: [], error: error.message || "读取失败" }),
+        setState({ loading: false, plans: [], planExecs: [], reviews: [], error: error.message || "读取失败" }),
     );
   useEffect(() => {
     const controller = new AbortController();
-    setState({ loading: true, plans: [], planExecs: [], error: "" });
+    setState({ loading: true, plans: [], planExecs: [], reviews: [], error: "" });
     reload(controller.signal);
     return () => controller.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -98,6 +98,35 @@ export default function PlansPage({ mode, devices, onChanged }) {
     () => buildAnnualReview(state.plans, state.planExecs, year),
     [state.plans, state.planExecs, year],
   );
+  const savedReviewBySystem = useMemo(() => {
+    const m = new Map();
+    for (const r of state.reviews || [])
+      if (r.year === year) m.set(r.system, r);
+    return m;
+  }, [state.reviews, year]);
+
+  // I-W10：把该年度考核结论落库（同一 system+year 覆盖更新）
+  const saveReview = async (row) => {
+    setBusy(`正在保存 ${row.systemName} ${year} 年度考核结论…`);
+    setActionError("");
+    try {
+      await savePlanReview(mode, {
+        system: row.system,
+        year,
+        summary: {
+          total: row.total, done: row.done, partial: row.partial,
+          missed: row.missed, unregistered: row.unregistered,
+          completionRate: row.completionRate,
+        },
+        conclusion: row.conclusion,
+      });
+      await reload();
+    } catch (error) {
+      setActionError(error.message || "保存考核结论失败");
+    } finally {
+      setBusy("");
+    }
+  };
 
   const submitPlan = async (e) => {
     e.preventDefault();
@@ -267,6 +296,7 @@ export default function PlansPage({ mode, devices, onChanged }) {
                   <th>未登记</th>
                   <th>完成率</th>
                   <th>考核结论</th>
+                  <th>落库状态</th>
                 </tr>
               </thead>
               <tbody>
@@ -282,6 +312,24 @@ export default function PlansPage({ mode, devices, onChanged }) {
                     <td>
                       <StatusBadge status={r.conclusion} />
                     </td>
+                    <td>
+                      {savedReviewBySystem.has(r.system) ? (
+                        <span className="saved-mark">
+                          已落库 · {(savedReviewBySystem.get(r.system).savedAt || "").slice(0, 10)}
+                        </span>
+                      ) : r.conclusion === "未制定计划" ? (
+                        <span className="muted">无需考核</span>
+                      ) : (
+                        <button
+                          type="button"
+                          className="text-button"
+                          disabled={busy}
+                          onClick={() => saveReview(r)}
+                        >
+                          保存结论
+                        </button>
+                      )}
+                    </td>
                   </tr>
                 ))}
               </tbody>
@@ -290,7 +338,8 @@ export default function PlansPage({ mode, devices, onChanged }) {
           <p className="muted review-note">
             考核口径：应执行=该年度该系统的计划数；未登记=无执行记录的计划；完成率=完成÷应执行。
             结论规则：≥90% 优秀，≥75% 合格，≥60% 基本合格，其余不合格；无计划显示"未制定计划"。
-            结论由系统按登记数据生成，可导出存档（不写回执行记录）。
+            结论由系统按登记数据生成，可导出存档；点击"保存结论"按系统+年度落库（I-W10），
+            同一系统同一年度重复保存为覆盖更新，可跨年查询对比。
           </p>
         </>
       ) : state.loading ? (

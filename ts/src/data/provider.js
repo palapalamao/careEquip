@@ -14,6 +14,7 @@ import {
   normalizeInspectionRows,
   normalizePlanRows,
   normalizePlanExecRows,
+  normalizeReviewRows,
   normalizeWorkOrderRows,
   resolveProject,
   assertWoTransition,
@@ -50,6 +51,7 @@ function axonValue(v) {
   if (v === null || v === undefined || v === "") return null;
   if (typeof v === "object" && v.__dmAxonRef) return v.__dmAxonRef;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
+  if (typeof v === "object") return axonDict(v);
   return `"${String(v).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 function axonDict(payload) {
@@ -186,6 +188,8 @@ export async function transitWorkOrder(mode, id, target, note = "") {
     const store = getDemoStore();
     const order = store.workOrders.find((w) => w.id === id);
     if (!order) throw new Error(`工单不存在：${id}`);
+    if (target === "closed" && !(note || "").trim())
+      throw new Error("关闭工单必须填写执行结果（dmWoResult 必填）");
     assertWoTransition(order.status, target);
     store.workOrders = store.workOrders.map((w) => {
       if (w.id !== id) return w;
@@ -299,15 +303,62 @@ export async function loadHistory(pointId, signal) {
 export async function loadPlans(mode, signal) {
   if (mode === "demo") {
     const store = getDemoStore();
-    return { plans: [...store.plans], planExecs: [...store.planExecs] };
+    return {
+      plans: [...store.plans],
+      planExecs: [...store.planExecs],
+      reviews: [...(store.reviews || [])],
+    };
   }
-  const [planRows, execRows] = await Promise.all([
+  const [planRows, execRows, reviewRows] = await Promise.all([
     finEval("readAll(dmPlan, {limit:1000})", signal),
     finEval("readAll(dmPlanExec, {limit:1000})", signal),
+    finEval("readAll(dmPlanReviewRec, {limit:1000})", signal),
   ]);
   const plans = normalizePlanRows(planRows);
   const plansById = new Map(plans.map((p) => [p.id, p]));
-  return { plans, planExecs: normalizePlanExecRows(execRows, plansById) };
+  return {
+    plans,
+    planExecs: normalizePlanExecRows(execRows, plansById),
+    reviews: normalizeReviewRows(reviewRows),
+  };
+}
+
+// I-W10 保存年度考核结论（同一 system+year 覆盖更新）
+export async function savePlanReview(mode, payload) {
+  const { system, year, summary, conclusion } = payload;
+  if (!system) throw new Error("必须选择系统");
+  if (!/^\d{4}$/.test(year || "")) throw new Error("考核年度格式应为 YYYY");
+  if (!conclusion) throw new Error("必须给出考核结论");
+  if (mode === "demo") {
+    const store = getDemoStore();
+    if (!store.reviews) store.reviews = [];
+    const idx = store.reviews.findIndex(
+      (r) => r.system === system && r.year === year,
+    );
+    const rec = {
+      id: idx >= 0 ? store.reviews[idx].id : `dm-local-review-${system}-${year}`,
+      system,
+      systemName: planSystemName(system),
+      year,
+      summary: { ...summary },
+      conclusion,
+      savedAt: nowIso(),
+      savedBy: "本地演示用户",
+      source: "synthetic",
+    };
+    if (idx >= 0) store.reviews[idx] = rec;
+    else store.reviews.push(rec);
+    return { id: rec.id };
+  }
+  await finEval(
+    `dmSavePlanReview(${axonDict({
+      dmReviewSystem: system,
+      dmReviewYear: year,
+      dmReviewSummary: summary,
+      dmReviewConclusion: conclusion,
+    })})`,
+  );
+  return { id: `${system}-${year}` };
 }
 
 // I-W8 新建运行计划（同系统同周期拒绝重复）

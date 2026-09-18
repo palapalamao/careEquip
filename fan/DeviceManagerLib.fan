@@ -9,7 +9,7 @@ const class DeviceManagerLib {
   static Dict dmInfo() {
     Etc.makeDict(["podName":"deviceManager", "version":DeviceManagerExt#.pod.version.toStr,
       "uiUri":"/pod/deviceManager/res/web/dm/index.html", "readOnly":false,
-      "writes":"dmCreateWorkOrder/dmTransitWorkOrder/dmSaveDeviceProfile/dmCreateInspection/dmCreatePlan/dmRecordPlanExec"])
+      "writes":"dmCreateWorkOrder/dmTransitWorkOrder/dmSaveDeviceProfile/dmCreateInspection/dmCreatePlan/dmRecordPlanExec/dmSavePlanReview"])
   }
 
   ** I-W1 新建运维工单。校验设备引用存在；写入只增记录。
@@ -64,8 +64,11 @@ const class DeviceManagerLib {
     ]
     if (target == "inProgress") changes["dmWoStarted"] = ts
     if (target == "closed") {
+      result := (note ?: "").trim
+      if (result.isEmpty)
+        throw ArgErr("dmWoResult is required when closing a work order")
       changes["dmWoClosed"] = ts
-      if (note != null) changes["dmWoResult"] = note
+      changes["dmWoResult"] = result
     }
     commitUpdate(rec, Etc.makeDict(changes))
     return evalReadById(id)
@@ -228,6 +231,55 @@ const class DeviceManagerLib {
     flags := Etc.makeDict(["add":Marker.val])
     d := AxonContext.curAxon.call("diff", [null, rec, flags])
     AxonContext.curAxon.call("commit", [d])
+  }
+
+  ** I-W10 年度考核结论落库（F-C R-C.3，v0.3.2）：同一 system+year 覆盖更新
+  ** （考核结论是派生汇总，非原始证据，是"只增不改"的 documented 例外）。
+  @Axon
+  static Dict dmSavePlanReview(Dict rec) {
+    system := rec["dmReviewSystem"] as Str ?:
+      throw ArgErr("dmReviewSystem is required")
+    if (!["medicalGas","elec","hvac","water","steam","heating"].contains(system))
+      throw ArgErr("dmReviewSystem must be medicalGas/elec/hvac/water/steam/heating")
+    year := rec["dmReviewYear"] as Str ?:
+      throw ArgErr("dmReviewYear is required")
+    if (!Regex("^\\d{4}").matches(year) || year.size != 4)
+      throw ArgErr("dmReviewYear must be YYYY")
+    conclusion := rec["dmReviewConclusion"] as Str ?:
+      throw ArgErr("dmReviewConclusion is required")
+    if (!["优秀","合格","基本合格","不合格"].contains(conclusion))
+      throw ArgErr("dmReviewConclusion must be 优秀/合格/基本合格/不合格")
+    summary := rec["dmReviewSummary"] ?: Etc.makeDict(Str:Obj[:])
+    filter := "dmPlanReviewRec and dmReviewSystem == \"" + system +
+              "\" and dmReviewYear == \"" + year + "\""
+    existing := Ref?[,]
+    ((Obj?)AxonContext.curAxon.call("readAll", [filter]) as Grid)?.each |Dict d| {
+      r := d["id"] as Ref
+      if (r != null) existing.add(r)
+    }
+    ts := DateTime.nowUtc
+    if (existing.size > 0) {
+      cur := evalReadById(existing.first)
+      commitUpdate(cur, Etc.makeDict(Str:Obj[
+        "dmReviewSummary":   summary,
+        "dmReviewConclusion": conclusion,
+        "dmReviewSavedAt":   ts,
+        "dmReviewSavedBy":   contextUser(),
+      ]))
+      return evalReadById(existing.first)
+    }
+    id := uniqueRef("dm-review")
+    commitAdd(Etc.makeDict(Str:Obj[
+      "id":                 id,
+      "dmPlanReviewRec":    Marker.val,
+      "dmReviewSystem":     system,
+      "dmReviewYear":       year,
+      "dmReviewSummary":    summary,
+      "dmReviewConclusion": conclusion,
+      "dmReviewSavedAt":    ts,
+      "dmReviewSavedBy":    contextUser(),
+    ]))
+    return evalReadById(id)
   }
 
   ** 受控更新：仅对给定标签做 update diff
