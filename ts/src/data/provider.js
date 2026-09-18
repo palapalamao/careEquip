@@ -37,12 +37,11 @@ async function finEval(expression, signal) {
   signal?.throwIfAborted();
   return grid.toJSON().rows || [];
 }
-// Axon 字面量：date / dateTime 原样输出，字符串转义，number/bool 原样
+// Axon 字面量：date / dateTime 以带引号 ISO 字符串发送（与 seed v2 一致；
+// 本 FIN 的 Axon 解析器不接受裸日期时间字面量）。number/bool 原样，字符串转义。
 function axonValue(v) {
   if (v === null || v === undefined || v === "") return null;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
-  if (/^\d{4}-\d{2}-\d{2}$/.test(v)) return v;
-  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}/.test(v)) return v;
   return `"${String(v).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
 function axonDict(payload) {
