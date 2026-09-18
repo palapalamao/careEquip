@@ -129,6 +129,7 @@ export function createDataset() {
 function createDemoDocs(devices) {
   return devices.map((d) => ({
     id: `dm-demo-doc-${d.code.toLowerCase()}-accept`,
+    deviceCode: d.code,
     type: "acceptance",
     typeName: docTypeName("acceptance"),
     date: "2024-06-30",

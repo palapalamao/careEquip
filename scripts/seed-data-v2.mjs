@@ -2,6 +2,7 @@
 import { HDict } from "../ts/node_modules/haystack-core/dist/index.js";
 // （dmDoc / dmWorkOrder / dmInspection）
 // 数据集 deviceManager-demo-v2：只增、防重放、引用指向 v1 设备记录（闭合）。
+// 防重放只针对 dmSynthetic 记录：真实运维记录（如用户经 I-W1 创建的工单）与种子共存，不受影响。
 import { createDataset, DATASET_ID, RECORDS_DATASET_ID } from "../ts/src/data/fixtures.js";
 const marker = { _kind: "marker" };
 const ref = (val) => ({ _kind: "ref", val });
@@ -69,7 +70,7 @@ export function createSeedExpressionV2() {
   const rows = createSeedRecordsV2()
     .map((r) => HDict.make(r).toAxon())
     .join(",\n    ");
-  return `do\n  existing: readAll(dmDataset == "${RECORDS_DATASET_ID}")\n  if (existing.size > 0) throw "deviceManager dataset ${RECORDS_DATASET_ID} already exists; reconcile it before any further write"\n  base: readAll(dmDataset == "${DATASET_ID}")\n  if (base.size == 0) throw "deviceManager dataset ${DATASET_ID} not found; seed v1 devices before v2 records"\n  rows: [\n    ${rows}\n  ]\n  commit(rows.map(r => diff(null, r, {add})))\nend\n`;
+  return `do\n  existing: readAll(dmDataset == "${RECORDS_DATASET_ID}" and dmSynthetic)\n  if (existing.size > 0) throw "deviceManager dataset ${RECORDS_DATASET_ID} already exists; reconcile it before any further write"\n  base: readAll(dmDataset == "${DATASET_ID}")\n  if (base.size == 0) throw "deviceManager dataset ${DATASET_ID} not found; seed v1 devices before v2 records"\n  rows: [\n    ${rows}\n  ]\n  commit(rows.map(r => diff(null, r, {add})))\nend\n`;
 }
 
 
