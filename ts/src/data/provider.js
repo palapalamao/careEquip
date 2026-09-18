@@ -41,6 +41,7 @@ async function finEval(expression, signal) {
 // 本 FIN 的 Axon 解析器不接受裸日期时间字面量）。number/bool 原样，字符串转义。
 function axonValue(v) {
   if (v === null || v === undefined || v === "") return null;
+  if (typeof v === "object" && v.__dmAxonRef) return v.__dmAxonRef;
   if (typeof v === "number" || typeof v === "boolean") return String(v);
   return `"${String(v).replaceAll("\\", "\\\\").replaceAll('"', '\\"')}"`;
 }
@@ -55,6 +56,9 @@ function axonDict(payload) {
   return `{${entries.join(", ")}}`;
 }
 const refOf = (deviceId) => `@${deviceId.replace(/^@/, "")}`;
+// Axon 引用值：以 @p:...:r:... 裸引用发送。后端按 Ref 接收（dmCreateWorkOrder/
+// dmCreateInspection），若带引号成字符串会被后端安全转型为 null 而报 "dmDeviceRef is required"。
+const axonRef = (id) => ({ __dmAxonRef: refOf(id) });
 
 export function hostProject() {
   let shell;
@@ -159,7 +163,7 @@ export async function createWorkOrder(mode, payload) {
   }
   const rows = await finEval(
     `dmCreateWorkOrder(${axonDict({
-      dmDeviceRef: deviceId,
+      dmDeviceRef: axonRef(deviceId),
       dmWoType: type || "maintenance",
       dmWoAssignee: assignee?.trim() || "未指派",
       dmWoScheduled: scheduled || undefined,
@@ -263,7 +267,7 @@ export async function createInspection(mode, payload) {
       dmInspectDate: date,
       dmInspectNote: note?.trim() || undefined,
       dmReportUri: reportUri?.trim() || undefined,
-      dmDeviceRef: deviceId || undefined,
+      dmDeviceRef: deviceId ? axonRef(deviceId) : undefined,
       dmDataset: RECORDS_DATASET_ID,
     })})`,
   );
