@@ -5,7 +5,7 @@ export const MODULES = [
   { id: "power", name: "供配电", code: "PDB", type: "低压配电柜", unit: "kW", metric: "有功功率", base: 126 },
   { id: "water", name: "给排水", code: "PMP", type: "变频供水泵", unit: "bar", metric: "出口压力", base: 4.2 },
   { id: "lighting", name: "智能照明", code: "LGT", type: "照明控制箱", unit: "%", metric: "回路负载率", base: 65 },
-  { id: "elevator", name: "电梯系统", code: "ELV", type: "医用电梯", unit: "%", metric: "载荷率", base: 32 },
+  { id: "elevator", name: "电梯监测", code: "ELV", type: "医用电梯", unit: "%", metric: "载荷率", base: 32 },
   { id: "safety", name: "安全防范", code: "SEC", type: "安防监测设备", unit: "%", metric: "设备利用率", base: 46 },
   { id: "medical-space", name: "医疗空间", code: "OR", type: "洁净手术室", unit: "Pa", metric: "房间压差", base: 12 },
   { id: "medical-equipment", name: "医疗设备", code: "MED", type: "医疗设备监测终端", unit: "°C", metric: "设备温度", base: 26 },
