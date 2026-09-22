@@ -131,20 +131,34 @@ export default function AnalyticsPage({ mode, devices }) {
       ),
   ];
 
+  const friendlyStepError = (step, error) => {
+    const msg = error?.message || "";
+    if (msg.includes("already applied"))
+      return `${step}已执行过（防重放保护，不重复写入），已跳过`;
+    return `${step}失败：${msg || "未知错误"}`;
+  };
+
   const seedData = async () => {
+    if (mode === "demo") {
+      setNotice("演示模式数据由本地确定性规则实时生成，无需种子。");
+      return;
+    }
     setNotice("正在写入演示历史与成本（仅模拟数据）…");
+    const parts = [];
     try {
       const seed = await seedSyntheticHistory(mode);
-      const fill = await backfillSyntheticCosts(mode);
-      setNotice(
-        mode === "demo"
-          ? "演示模式数据由本地确定性规则实时生成，无需种子。"
-          : `历史种子完成（写入 ${seed.seeded} 点，跳过 ${seed.skipped} 点）；` +
-              `成本回填完成（工单 ${fill.workOrders} 条，设备 ${fill.devices} 台）。刷新后查看统计。`,
-      );
+      parts.push(`历史种子完成（写入 ${seed.seeded} 点，跳过 ${seed.skipped} 点）`);
     } catch (error) {
-      setNotice(error.message || "种子/回填失败");
+      parts.push(friendlyStepError("历史种子", error));
     }
+    try {
+      const fill = await backfillSyntheticCosts(mode);
+      parts.push(`成本回填完成（工单 ${fill.workOrders} 条，设备 ${fill.devices} 台）`);
+    } catch (error) {
+      parts.push(friendlyStepError("成本回填", error));
+    }
+    parts.push("刷新后查看统计。");
+    setNotice(parts.join("；"));
   };
 
   const utilRowsSorted = useMemo(

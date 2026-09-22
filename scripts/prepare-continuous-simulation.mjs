@@ -13,10 +13,11 @@ const configs = createDataset().devices.map((d, i) => {
 const tick = `do
   configs: [${configs.join(',\n')}]
   stamp: now().toTimeZone("Shanghai")
-  ts0: dateTime(date(2026,01,01), time(00,00), "Shanghai")
-  h: ((stamp - ts0) / 1hr).toInt
+  // Plain-integer tick counter: reference point hisSize. Duration math would
+  // leave compound units (_h/h) on computed values and hisWrite rejects them.
+  tick: readById(@dm-demo-ahu-001-primary)->hisSize
   hour: stamp.hour
-  wd: weekday(stamp.date) / 1day
+  wd: weekday(stamp.date)
   weekend: wd == 0 or wd == 6
   configs.each(c => do
     p: readById(c->point)
@@ -28,9 +29,10 @@ const tick = `do
     e: readById(c->equip)
     base: c->base
     idx: c->idx
-    tri: ((h + idx * 3) % 16) / 16
+    c3: tick + idx * 3
+    tri: (c3 - (c3 / 16).floor * 16) / 16
     dayBase: if (weekend) base * 0.85 else base
-    value: if (idx == 22 or idx == 23) base * 0.01 else if (idx == 41) (if (h % 47 == 0) base * 1.15 else base * (1.02 + ((h % 8) / 8) * 0.08)) else if (hour < 7 or hour >= 23) base * 0.02 else dayBase * (0.5 + 0.35 * tri)
+    value: if (idx == 22 or idx == 23) base * 0.01 else if (idx == 41) (if (tick - (tick / 47).floor * 47 == 0) base * 1.15 else base * (1.02 + ((tick - (tick / 8).floor * 8) / 8) * 0.08)) else if (hour < 7 or hour >= 23) base * 0.02 else dayBase * (0.5 + 0.35 * tri)
     if (not p.has("hisEnd") or p->hisEnd < stamp) do
       // FIN history writes are asynchronous.  Yield in the native job context
       // before advancing, so the history actor can complete this point.
@@ -41,7 +43,7 @@ const tick = `do
       commit(diff(e, {dmValue:value,dmQuality:"fresh",dmUpdatedAt:stamp}))
     end
   end)
-  {points:configs.size,ts:stamp,source:"deviceManager synthetic continuous simulation v5 storyline"}
+  {points:configs.size,ts:stamp,source:"deviceManager synthetic continuous simulation v6 storyline"}
 end`;
 
 const job = HDict.make({
@@ -63,7 +65,7 @@ const install = `do
 end`;
 const updateTags = HDict.make({
   jobExpr:tick,
-  dmProvenance:'deviceManager continuous simulation v5',
+  dmProvenance:'deviceManager continuous simulation v6',
   doc:'Updates 48 synthetic current values and appends history every minute. Persists page snapshots and yields after each history write. Disable this job to stop. Never writes a connector or physical output.',
 });
 const updateTagsAxon = updateTags.toAxon();
