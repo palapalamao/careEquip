@@ -34,6 +34,7 @@ createRoot(document.getElementById("root")).render(
           <Route path="/workorders" element={<App />} />
           <Route path="/inspections" element={<App />} />
           <Route path="/plans" element={<App />} />
+          <Route path="/analytics" element={<App />} />
           <Route path="*" element={<Navigate to="/overview" replace />} />
         </Routes>
       </HashRouter>

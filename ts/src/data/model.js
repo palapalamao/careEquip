@@ -78,6 +78,10 @@ export function normalizeFinRows(rows) {
       commissionDate: get("dmCommissionDate") || null,
       inServiceDate: get("dmInServiceDate") || null,
       acceptanceDocId: get("dmAcceptanceDocRef") || null,
+      // F-D I-R1 扩展：财务/利用率档案（无值保留空，不伪造）
+      purchaseCost: typeof get("dmPurchaseCost") === "number" ? get("dmPurchaseCost") : null,
+      annualBenefit: typeof get("dmAnnualBenefit") === "number" ? get("dmAnnualBenefit") : null,
+      ratedValue: typeof get("dmRatedValue") === "number" ? get("dmRatedValue") : null,
       points: [
         {
           id: `${get("id")}-value`,
@@ -141,6 +145,8 @@ export function normalizeWorkOrderRows(rows, devicesById = new Map()) {
         closed: get("dmWoClosed") || null,
         content: get("dmWoContent") || "",
         result: get("dmWoResult") || "",
+        // F-D I-W1 扩展：维修成本（元，可空）
+        cost: typeof get("dmWoCost") === "number" ? get("dmWoCost") : null,
         createdAt: get("dmCreatedAt") || get("dmWoScheduled") || null,
         createdBy: get("dmCreatedBy") || "unknown",
         dataset: get("dmDataset") || "unknown",
@@ -461,4 +467,228 @@ export function annualReviewToCsv(review) {
     ]),
   ];
   return "﻿" + rows.map((r) => r.map(safe).join(",")).join("\r\n");
+}
+
+// ===== F-D 数据分析与决策支持（R8，v0.4.0）纯函数 =====
+// 口径文档：docs/plan/01-需求定义.md R8；阈值集中于此，后续可调。
+import { woCostOf, deviceFinancials } from "./fixtures.js";
+
+export const UTIL_THRESHOLDS = {
+  idleOnRatio: 0.2, // 闲置：开机率 < 20%
+  overloadLoad: 0.9, // 过载：负荷率 > 90%
+  overloadPeak: 1.1, // 或峰值负荷 > 110%
+};
+export const FAILURE_RULES = {
+  freqPerYear: 3, // 频次 ≥3 次/年 → 关注
+  mttrHours: 48, // MTTR > 48h → 关注
+  costVsPurchase: 0.15, // 年维修成本 > 采购价 ×15% → 关注
+  retireVsPurchase: 0.5, // 累计维修成本 > 采购价 ×50% → 建议评估更新淘汰
+};
+
+// 工单成本取值：显式成本（FIN 回填 dmWoCost）优先；模拟数据按确定性规则推导
+export function resolveWoCost(wo) {
+  if (typeof wo.cost === "number" && Number.isFinite(wo.cost)) return wo.cost;
+  if (wo.source === "synthetic") return woCostOf(wo);
+  return 0;
+}
+
+// I-R14 FIN 行归一化（dmComputeUtilization 返回 Grid）
+export function normalizeUtilizationRows(rows) {
+  return rows.map((row) => {
+    const get = (key) => unwrap(row[key]);
+    const num = (key) => {
+      const v = get(key);
+      return typeof v === "number" && Number.isFinite(v) ? v : null;
+    };
+    const status = get("status") || "noHis";
+    return {
+      deviceId: get("deviceRef") || "",
+      deviceCode: get("deviceCode") || "—",
+      deviceName: get("deviceName") || "未命名设备",
+      module: get("module") || "unclassified",
+      rated: num("rated"),
+      onRatio: num("onRatio"),
+      useHours: num("useHours"),
+      loadRatio: num("loadRatio"),
+      peakRatio: num("peakRatio"),
+      samples: num("samples"),
+      status,
+    };
+  });
+}
+
+const monthKeyOf = (iso) =>
+  iso && /^\d{4}-\d{2}/.test(String(iso)) ? String(iso).slice(0, 7) : null;
+
+// 近 12 个月月份标签（含当月），与工单数据按月对齐
+export function lastMonthLabels(now = new Date()) {
+  const labels = [];
+  const y = now.getFullYear(),
+    m = now.getMonth();
+  for (let k = 11; k >= 0; k--) {
+    const d = new Date(y, m - k, 1);
+    labels.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`);
+  }
+  return labels;
+}
+
+// F4.2 故障趋势分析（前端纯函数，I-R3 工单聚合）
+// 规则：频次≥3/年 或 MTTR>48h 或 维修成本>采购价×15% → 「关注」；
+// 累计维修成本>采购价×50% → 「建议评估更新淘汰」（取最高档）。
+export function buildFailureStats(workOrders, devices, now = new Date()) {
+  const devicesById = new Map(devices.map((d) => [d.id, d]));
+  const purchaseOf = (deviceId) => {
+    const d = devicesById.get(deviceId);
+    if (!d) return null;
+    if (typeof d.purchaseCost === "number") return d.purchaseCost;
+    if (d.source === "synthetic") return deviceFinancials(d).purchaseCost;
+    return null;
+  };
+  const byDevice = new Map();
+  for (const w of workOrders) {
+    if (w.type !== "repair") continue;
+    const a = byDevice.get(w.deviceId) || {
+      deviceId: w.deviceId,
+      count: 0,
+      cost: 0,
+      repairHours: [],
+      months: {},
+    };
+    a.count += 1;
+    a.cost += resolveWoCost(w);
+    if (w.status === "closed" && w.started && w.closed) {
+      const h = (Date.parse(w.closed) - Date.parse(w.started)) / 3600000;
+      if (Number.isFinite(h) && h >= 0) a.repairHours.push(h);
+    }
+    const mk = monthKeyOf(w.scheduled || w.createdAt);
+    if (mk) a.months[mk] = (a.months[mk] || 0) + 1;
+    byDevice.set(w.deviceId, a);
+  }
+  const monthLabels = lastMonthLabels(now);
+  const rows = [...byDevice.values()].map((a) => {
+    const device = devicesById.get(a.deviceId) || {};
+    const purchase = purchaseOf(a.deviceId);
+    const mttrHours = a.repairHours.length
+      ? a.repairHours.reduce((s, v) => s + v, 0) / a.repairHours.length
+      : null;
+    let flag = "";
+    if (purchase != null && a.cost / 10000 > purchase * FAILURE_RULES.retireVsPurchase)
+      flag = "retire";
+    else if (
+      a.count >= FAILURE_RULES.freqPerYear ||
+      (mttrHours != null && mttrHours > FAILURE_RULES.mttrHours) ||
+      (purchase != null && a.cost / 10000 > purchase * FAILURE_RULES.costVsPurchase)
+    )
+      flag = "watch";
+    return {
+      deviceId: a.deviceId,
+      deviceCode: device.code || "—",
+      deviceName: device.name || "未关联设备",
+      module: device.module || "unclassified",
+      count: a.count,
+      cost: a.cost,
+      mttrHours,
+      months: monthLabels.map((label) => ({ label, count: a.months[label] || 0 })),
+      flag,
+      purchaseCost: purchase,
+    };
+  });
+  rows.sort((a, b) => b.cost - a.cost || b.count - a.count);
+  return { rows, monthLabels };
+}
+
+const YEAR_MS = 365.25 * 24 * 3600000;
+
+// F4.3 效益评估（前端纯函数）
+// LCC = 采购成本 + 累计维修成本（能耗不计，既定要求）；已用年限 = now − 投用日期
+// （缺投用日期用验收日期，皆无 → 「未登记」）；ROI =（年收益×已用年限 − LCC）÷ LCC × 100%，
+// 缺年收益/采购成本 → 「待补充」。
+export function buildBenefitStats(devices, workOrders, now = new Date()) {
+  const repairCost = new Map();
+  for (const w of workOrders) {
+    if (w.type !== "repair") continue;
+    repairCost.set(w.deviceId, (repairCost.get(w.deviceId) || 0) + resolveWoCost(w));
+  }
+  return devices.map((d) => {
+    const fin =
+      typeof d.purchaseCost === "number"
+        ? {
+            purchaseCost: d.purchaseCost,
+            annualBenefit: d.annualBenefit,
+          }
+        : d.source === "synthetic"
+          ? deviceFinancials(d)
+          : { purchaseCost: null, annualBenefit: null };
+    const repairWan = (repairCost.get(d.id) || 0) / 10000;
+    const lcc =
+      fin.purchaseCost != null ? fin.purchaseCost + repairWan : null;
+    const inService = d.inServiceDate || d.commissionDate;
+    const years =
+      inService && Number.isFinite(Date.parse(inService))
+        ? Math.max((now.getTime() - Date.parse(inService)) / YEAR_MS, 0)
+        : null;
+    const usableYears = years != null && years > 0.05 ? years : null;
+    const roi =
+      lcc != null && fin.annualBenefit != null && usableYears != null
+        ? ((fin.annualBenefit * usableYears - lcc) / lcc) * 100
+        : null;
+    const annualCost =
+      lcc != null && usableYears != null ? lcc / usableYears : null;
+    return {
+      deviceId: d.id,
+      deviceCode: d.code,
+      deviceName: d.name,
+      module: d.module,
+      purchaseCost: fin.purchaseCost,
+      repairCostWan: repairWan,
+      lcc,
+      years: usableYears,
+      yearsRegistered: years != null,
+      annualBenefit: fin.annualBenefit,
+      roi,
+      annualCost,
+      flag:
+        roi == null
+          ? "missing"
+          : roi < 0
+            ? "loss"
+            : roi < 30
+              ? "low"
+              : "good",
+    };
+  });
+}
+
+// ===== F-D CSV 导出 =====
+export function utilizationToCsv(rows) {
+  const pct = (v) => (v == null ? "" : (v * 100).toFixed(1) + "%");
+  const num = (v, d = 2) => (v == null ? "" : v.toFixed(d));
+  const statusName = { idle: "闲置", overload: "过载", ok: "正常", noHis: "无历史", noRated: "无额定基线" };
+  const head = "设备编号,设备名称,系统,额定基线,开机率,使用时长(h),负荷率,峰值负荷,样本数,状态";
+  const lines = rows.map(
+    (r) =>
+      `${r.deviceCode},${r.deviceName},${r.module},${num(r.rated, 1)},${pct(r.onRatio)},${num(r.useHours, 1)},${pct(r.loadRatio)},${pct(r.peakRatio)},${r.samples ?? ""},${statusName[r.status] || r.status}`,
+  );
+  return [head, ...lines].join("\n");
+}
+export function failureStatsToCsv(stats) {
+  const flagName = { retire: "建议评估更新淘汰", watch: "关注", "": "" };
+  const head = `设备编号,设备名称,系统,维修频次,维修成本(元),MTTR(h),近12月频次,标记`;
+  const lines = stats.rows.map((r) => {
+    const seq = r.months.map((m) => `${m.label}:${m.count}`).join(" ");
+    const mttr = r.mttrHours == null ? "" : r.mttrHours.toFixed(1);
+    return `${r.deviceCode},${r.deviceName},${r.module},${r.count},${r.cost},${mttr},"${seq}",${flagName[r.flag] || ""}`;
+  });
+  return [head, ...lines].join("\n");
+}
+export function benefitToCsv(rows) {
+  const wan = (v) => (v == null ? "" : v.toFixed(2));
+  const head = "设备编号,设备名称,系统,采购成本(万),累计维修(万),LCC(万),已用年限,年收益(万/年),ROI,年均成本(万/年),状态";
+  const flagName = { missing: "待补充", loss: "亏损", low: "偏低", good: "良好" };
+  const lines = rows.map((r) => {
+    const roi = r.roi == null ? "" : r.roi.toFixed(1) + "%";
+    const years = r.years == null ? (r.yearsRegistered ? "不足半年" : "未登记") : r.years.toFixed(1);
+    return `${r.deviceCode},${r.deviceName},${r.module},${wan(r.purchaseCost)},${wan(r.repairCostWan)},${wan(r.lcc)},${years},${wan(r.annualBenefit)},${roi},${wan(r.annualCost)},${flagName[r.flag] || ""}`;
+  });
+  return [head, ...lines].join("\n");
 }

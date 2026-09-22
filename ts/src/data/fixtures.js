@@ -560,3 +560,101 @@ function createDemoPlanReviews() {
 }
 
 // createDataset 组装：plans/planExecs 在 return 前生成（见上）
+
+// ===== F-D 数据分析与决策支持（R8，v0.4.0）=====
+// 确定性规则与后端 DeviceManagerLib.fan（dmBackfillSyntheticCosts / dmSeedSyntheticHistory /
+// dmComputeUtilization）同口径：同一 hash 算法、同一模块档位、同一 storyline 规则。
+
+// djb2 32 位散列（与 Fantom hash32 同口径）
+export function hash32(s) {
+  let h = 5381;
+  for (let i = 0; i < s.length; i++) h = (Math.imul(h, 33) + s.charCodeAt(i)) >>> 0;
+  return h;
+}
+
+// 演示工单成本（元）：maintenance 200~799 / repair 800~2999 / retrofit 3000~7999
+export function woCostOf(wo) {
+  // 与 Fantom woCostOf 同口径：FIN 侧散列输入为记录 ref 全串（p:mytest:r:<id>）
+  const h = hash32("p:mytest:r:" + wo.id);
+  if (wo.type === "repair") return 800 + ((h >>> 3) % 2200);
+  if (wo.type === "retrofit") return 3000 + ((h >>> 6) % 5000);
+  return 200 + (h % 600);
+}
+
+// 模块采购成本档位（万元），5~80 万区间（与 Fantom moduleTier 一致）
+export const MODULE_TIERS = {
+  hvac: 40,
+  power: 55,
+  water: 22,
+  lighting: 8,
+  elevator: 45,
+  safety: 14,
+  "medical-space": 62,
+  "medical-equipment": 30,
+};
+
+// 演示设备财务档案（确定性）：采购成本/年收益/额定基线（与 Fantom 同公式）
+export function deviceFinancials(device) {
+  // 与 Fantom purchaseCostOf/annualBenefitOf 同口径：散列输入为记录 ref 全串
+  const tier = MODULE_TIERS[device.module] ?? 20;
+  const ref = "p:mytest:r:" + device.id;
+  const h = hash32(ref);
+  const purchaseCost = Math.round(tier * (0.8 + (h % 41) / 100) * 100) / 100;
+  const annualBenefit = 1 + (hash32("ab:" + ref) % 20);
+  const module = MODULES.find((m) => m.id === device.module);
+  const ratedValue = module ? module.base : 1;
+  return { purchaseCost, annualBenefit, ratedValue };
+}
+
+// storyline 判定（与 Fantom synthVal 同口径）：闲置 = 全局序号 22/23（照明 5/6 号）；
+// 过载 = 全局序号 41（手术室 6 号）。设备序号 = MODULES 序 * 6 + 机位序。
+function synthVal(idx, base, h, hour, weekend) {
+  const round2 = (x) => Math.round(x * 100) / 100;
+  if (idx === 22 || idx === 23) return round2(base * 0.01);
+  if (idx === 41) {
+    if (h % 47 === 0) return round2(base * 1.15);
+    return round2(base * (1.02 + ((h % 8) / 8) * 0.08));
+  }
+  if (hour < 7 || hour >= 23) return round2(base * 0.02);
+  const tri = ((h + idx * 3) % 16) / 16;
+  const v = base * (0.5 + 0.35 * tri) * (weekend ? 0.85 : 1);
+  return round2(v);
+}
+
+// F4.1 demo 模式利用率生成器：近 days 天逐小时聚合（北京时间墙钟；与 Fantom 同规则）
+export function buildDemoUtilization(devices, days) {
+  const tzMs = 8 * 3600000;
+  const now = Date.now();
+  const endMs = Math.floor((now + tzMs) / 3600000) * 3600000; // 北京时间整点（UTC 帧）
+  const startMs = endMs - days * 24 * 3600000;
+  return devices.map((d, idx) => {
+    const module = MODULES.find((m) => m.id === d.module);
+    const base = module ? module.base : 1;
+    let n = 0, on = 0, sum = 0, max = 0;
+    for (let k = 0; k < days * 24; k++) {
+      const bj = new Date(startMs + k * 3600000 + tzMs);
+      const v = synthVal(idx, base, k, bj.getUTCHours(), bj.getUTCDay() === 0 || bj.getUTCDay() === 6);
+      n++;
+      sum += v;
+      if (v > max) max = v;
+      if (v >= base * 0.05) on++;
+    }
+    const onRatio = n ? on / n : 0;
+    const loadRatio = n ? sum / n / base : 0;
+    const peakRatio = max / base;
+    return {
+      deviceId: d.id,
+      deviceCode: d.code,
+      deviceName: d.name,
+      module: d.module,
+      rated: base,
+      onRatio,
+      useHours: onRatio * days * 24,
+      loadRatio,
+      peakRatio,
+      samples: n,
+      status:
+        onRatio < 0.2 ? "idle" : loadRatio > 0.9 || peakRatio > 1.1 ? "overload" : "ok",
+    };
+  });
+}

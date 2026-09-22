@@ -1182,3 +1182,117 @@ tbody tr:hover {
 }
 
 .saved-mark { color: var(--ok, #2e7d32); font-size: 12px; }
+
+/* ===== F-D 数据分析（v0.4.0） ===== */
+.tabs {
+  display: flex;
+  gap: 6px;
+  margin: 12px 0;
+  border-bottom: 1px solid #e2e6ee;
+}
+.tab {
+  border: none;
+  background: transparent;
+  padding: 8px 14px;
+  font-size: 14px;
+  color: #5a6472;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  margin-bottom: -1px;
+}
+.tab:hover {
+  color: #1f2733;
+}
+.tab.active {
+  color: #1f4e8c;
+  border-bottom-color: #1f4e8c;
+  font-weight: 600;
+}
+.analytics-notice {
+  margin: 8px 0;
+  padding: 8px 12px;
+  background: #f2f6fc;
+  border: 1px solid #d7e3f4;
+  border-radius: 8px;
+  font-size: 13px;
+  color: #33507a;
+}
+.chart-box {
+  margin: 8px 0 16px;
+  padding: 8px;
+  border: 1px solid #e2e6ee;
+  border-radius: 10px;
+}
+.count-pill {
+  display: inline-block;
+  padding: 2px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  background: #eef1f6;
+  color: #4a5462;
+}
+.util-idle,
+.flag-retire {
+  background: #fdeaea;
+  color: #b3261e;
+}
+.util-overload,
+.flag-watch {
+  background: #fdf3e2;
+  color: #9a5b00;
+}
+.benefit-missing {
+  background: #eef1f6;
+  color: #6b7686;
+}
+.benefit-loss {
+  background: #fdeaea;
+  color: #b3261e;
+}
+.benefit-low {
+  background: #fdf3e2;
+  color: #9a5b00;
+}
+.benefit-good {
+  background: #e8f6ec;
+  color: #1c7a3d;
+}
+
+/* 打印决策报告：隐藏应用外壳，仅打印报告区 */
+.print-only {
+  display: none;
+}
+@media print {
+  .app-shell {
+    visibility: hidden;
+  }
+  .print-only {
+    display: block;
+    visibility: visible;
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    padding: 12mm;
+    font-size: 12px;
+    color: #000;
+  }
+  .print-only h1 {
+    font-size: 18px;
+    margin: 0 0 4px;
+  }
+  .print-only h2 {
+    font-size: 14px;
+    margin: 14px 0 6px;
+  }
+  .print-only table {
+    width: 100%;
+    border-collapse: collapse;
+  }
+  .print-only th,
+  .print-only td {
+    border: 1px solid #999;
+    padding: 3px 6px;
+    text-align: left;
+  }
+}

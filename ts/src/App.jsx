@@ -3,6 +3,7 @@ import { NavLink, useLocation, useNavigate } from "react-router-dom";
 import {
   Activity,
   ArrowUpRight,
+  BarChart3,
   Bell,
   Box,
   Building2,
@@ -40,6 +41,7 @@ import DeviceDetail from "@/components/DeviceDetail";
 import WorkOrdersPage from "@/pages/WorkOrders";
 import InspectionsPage from "@/pages/Inspections";
 import PlansPage from "@/pages/Plans";
+import AnalyticsPage from "@/pages/Analytics";
 const ICONS = {
   hvac: Fan,
   power: Zap,
@@ -57,6 +59,7 @@ const PAGE_NAMES = {
   workorders: "运维工单",
   inspections: "检测记录",
   plans: "运行计划",
+  analytics: "数据分析",
 };
 const initialMode = () =>
   new URLSearchParams(window.location.search).get("mode") === "demo"
@@ -213,6 +216,10 @@ export default function App() {
           <NavLink to="/plans">
             <Calendar size={18} />
             运行计划
+          </NavLink>
+          <NavLink to="/analytics">
+            <BarChart3 size={18} />
+            数据分析
           </NavLink>
         </nav>
         <div className="sidebar-section">设备系统</div>
@@ -643,6 +650,8 @@ export default function App() {
                   devices={devices}
                   onChanged={() => setRevision((v) => v + 1)}
                 />
+              ) : page === "analytics" ? (
+                <AnalyticsPage mode={mode} devices={devices} />
               ) : (
                 <section className="panel">
                   <div className="panel-title">

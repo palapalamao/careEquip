@@ -15,6 +15,7 @@ import {
   normalizePlanRows,
   normalizePlanExecRows,
   normalizeReviewRows,
+  normalizeUtilizationRows,
   normalizeWorkOrderRows,
   resolveProject,
   assertWoTransition,
@@ -432,4 +433,38 @@ export async function recordPlanExec(mode, payload) {
     })})`,
   );
   return { id: null };
+}
+
+// ===== F-D 数据分析接口（docs/plan/04-接口清单.md）=====
+
+// I-R14 设备利用率聚合：FIN 走 lib 只读函数；demo 读 fixtures 确定性生成器
+export async function loadUtilization(mode, days, signal) {
+  if (![7, 30, 90].includes(days)) throw new Error("统计窗口必须为 7/30/90 天");
+  if (mode === "demo") {
+    const { buildDemoUtilization } = await import("./fixtures.js");
+    return buildDemoUtilization(getDemoStore().devices, days);
+  }
+  const rows = await finEval(`dmComputeUtilization(${days})`, signal);
+  return normalizeUtilizationRows(rows);
+}
+
+// I-W12 演示历史种子（FIN 专用；demo 为本地生成无需种子）
+export async function seedSyntheticHistory(mode) {
+  if (mode === "demo") return { seeded: 0, skipped: 0, demo: true };
+  const rows = await finEval("dmSeedSyntheticHistory()");
+  const r = rows[0] || {};
+  const get = (k) => (r[k] && typeof r[k] === "object" ? r[k].val ?? r[k].value : r[k]);
+  return { seeded: Number(get("seeded")) || 0, skipped: Number(get("skipped")) || 0 };
+}
+
+// I-W11 演示成本回填（FIN 专用；demo 由确定性规则实时推导）
+export async function backfillSyntheticCosts(mode) {
+  if (mode === "demo") return { workOrders: 0, devices: 0, demo: true };
+  const rows = await finEval("dmBackfillSyntheticCosts()");
+  const r = rows[0] || {};
+  const get = (k) => (r[k] && typeof r[k] === "object" ? r[k].val ?? r[k].value : r[k]);
+  return {
+    workOrders: Number(get("dmWorkOrder")) || 0,
+    devices: Number(get("dmDevice")) || 0,
+  };
 }

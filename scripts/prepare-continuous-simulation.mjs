@@ -2,17 +2,22 @@ import { writeFileSync } from 'node:fs';
 import { HDict } from '../ts/node_modules/haystack-core/dist/index.js';
 import { createDataset, MODULES } from '../ts/src/data/fixtures.js';
 
+// F-D 同口径：持续模拟按 storyline 规则取值（闲置 22/23、过载 41、昼夜/周末节律），
+// 与 dmSeedSyntheticHistory / fixtures.synthVal 一致，保证利用率分析长期有效。
 const configs = createDataset().devices.map((d, i) => {
   const base = MODULES.find(m => m.id === d.module).base + (i % 6) * 0.3;
-  return `{equip:@${d.id},point:@${d.id}-primary,base:${base.toFixed(2)},amp:${(base * 0.06).toFixed(3)},phase:${(i * 0.31).toFixed(2)}}`;
+  return `{equip:@${d.id},point:@${d.id}-primary,base:${base.toFixed(2)},idx:${i}}`;
 });
 
 // Fixed membership prevents newly created or unrelated points entering the job.
 const tick = `do
   configs: [${configs.join(',\n')}]
   stamp: now().toTimeZone("Shanghai")
-  anchor: readById(@dm-demo-ahu-001-primary)->dmTelemetryEnd
-  elapsed: (stamp - anchor) / 1min
+  ts0: dateTime(date(2026,01,01), time(00,00), "Shanghai")
+  h: ((stamp - ts0) / 1hr).toInt
+  hour: stamp.hour
+  wd: weekday(stamp.date) / 1day
+  weekend: wd == 0 or wd == 6
   configs.each(c => do
     p: readById(c->point)
     e: readById(c->equip)
@@ -21,7 +26,11 @@ const tick = `do
   configs.each(c => do
     p: readById(c->point)
     e: readById(c->equip)
-    value: c->base + sin(19.2 + elapsed / 75 + c->phase) * c->amp + sin(elapsed / 3 + c->phase) * c->amp * 0.15
+    base: c->base
+    idx: c->idx
+    tri: ((h + idx * 3) % 16) / 16
+    dayBase: if (weekend) base * 0.85 else base
+    value: if (idx == 22 or idx == 23) base * 0.01 else if (idx == 41) (if (h % 47 == 0) base * 1.15 else base * (1.02 + ((h % 8) / 8) * 0.08)) else if (hour < 7 or hour >= 23) base * 0.02 else dayBase * (0.5 + 0.35 * tri)
     if (not p.has("hisEnd") or p->hisEnd < stamp) do
       // FIN history writes are asynchronous.  Yield in the native job context
       // before advancing, so the history actor can complete this point.
@@ -32,7 +41,7 @@ const tick = `do
       commit(diff(e, {dmValue:value,dmQuality:"fresh",dmUpdatedAt:stamp}))
     end
   end)
-  {points:configs.size,ts:stamp,source:"deviceManager synthetic continuous simulation"}
+  {points:configs.size,ts:stamp,source:"deviceManager synthetic continuous simulation v5 storyline"}
 end`;
 
 const job = HDict.make({
@@ -54,7 +63,7 @@ const install = `do
 end`;
 const updateTags = HDict.make({
   jobExpr:tick,
-  dmProvenance:'deviceManager continuous simulation v4',
+  dmProvenance:'deviceManager continuous simulation v5',
   doc:'Updates 48 synthetic current values and appends history every minute. Persists page snapshots and yields after each history write. Disable this job to stop. Never writes a connector or physical output.',
 });
 const updateTagsAxon = updateTags.toAxon();
